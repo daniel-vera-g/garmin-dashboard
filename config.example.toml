@@ -33,6 +33,7 @@ consistency_warn_min = 75   # under this -> amber, above -> red
 [threshold]
 cap_long_bpm = 165          # HR cap for reps >= long_rep_m
 cap_short_bpm = 170         # HR cap for shorter reps
+cap_tolerance_bpm = 0       # reps up to this far over their cap count as within (shown amber)
 long_rep_m = 1200
 subt_max_slower_s = 30      # reps slower than LT pace + this are aerobic, not reps
 speed_margin_s = 8          # median rep this much faster than LT pace = speed session
@@ -51,6 +52,7 @@ min_minutes = 60            # the week's longest unstructured run counts as the 
 run_days_target = 6
 run_days_min = 5
 run_km_tolerance = 0.10     # +/- 10 % around the weekly target
+threshold_tolerance = 0.0   # +/- around the threshold-km band; 0 = judged as written
 
 [bike]
 max_hours = 3.0
@@ -101,6 +103,7 @@ targets = [ { per_week = 2 } ]
 # {easy_hr_cap_bpm}, {max_km}, {bedtime_target} ... are filled in from the settings.
 [alerts]
 over_cap = "Ease off inside the rep. Next hard day +48 h"
+near_cap = "Close to the cap - ease off a little inside the rep"
 easy = "Easy profile, no pace field"
 run_share = "Running floor first"
 bike_hours = "No more riding this week"
@@ -162,3 +165,11 @@ recovery = true             # running-share rule is off in recovery phases
 n = 12
 run_km = 55
 threshold = [12, 16]
+
+# Optional: the coach's word on single sessions. Reclassify (kind = "speed" / "subt" /
+# "race" / "test") and/or accept the verdict; the note shows in the session list.
+# name = "..." picks one activity when a day has several.
+[[session]]
+date = 2030-03-20
+kind = "speed"
+note = "planned change: fast session instead of sub-T"

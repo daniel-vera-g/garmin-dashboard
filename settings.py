@@ -20,7 +20,8 @@ from typing import Any
 
 ROOT = Path(__file__).parent
 PRIVATE = ROOT / "private"                  # gitignored: config, notes, backups
-SEASON_KEYS = ("season", "race", "phase", "week")
+SEASON_KEYS = ("season", "race", "phase", "week", "session")
+SESSION_KINDS = ("speed", "subt", "race", "test")       # what a [[session]] override may reclassify to
 
 
 def config_path() -> Path:
@@ -53,6 +54,7 @@ DEFAULTS: dict[str, Any] = {
     # The "-> what to do" line under each alert, by alert key.
     "alerts": {
         "over_cap": "Ease off inside the rep. Next hard day +48 h",
+        "near_cap": "Close to the cap - ease off a little inside the rep",
         "easy": "Easy profile, no pace field",
         "run_share": "Running floor first",
         "bike_hours": "No more riding this week",
@@ -80,6 +82,7 @@ DEFAULTS: dict[str, Any] = {
     "threshold": {
         "cap_long_bpm": 165,       # reps >= long_rep_m
         "cap_short_bpm": 170,      # shorter reps
+        "cap_tolerance_bpm": 0,    # a rep this close above its cap counts as within, flagged amber
         "long_rep_m": 1200,
         "subt_max_slower_s": 30,   # rep slower than LT pace + this is aerobic, not a rep
         "speed_margin_s": 8,       # session's median rep this much faster than LT = speed session
@@ -88,7 +91,10 @@ DEFAULTS: dict[str, Any] = {
     },
     "easy": {"hr_cap_bpm": 140, "max_share_above": 0.10},
     "long_run": {"hr_cap_bpm": 140, "min_minutes": 60},
-    "runs": {"run_days_target": 6, "run_days_min": 5, "run_km_tolerance": 0.10},
+    "runs": {"run_days_target": 6, "run_days_min": 5, "run_km_tolerance": 0.10,
+             # +/- around the threshold-km band; 0 = a range is judged as written
+             # (a single planned figure then uses run_km_tolerance)
+             "threshold_tolerance": 0.0},
     "bike": {
         "max_hours": 3.0,
         "easy_hr_cap_bpm": 125,
@@ -204,6 +210,17 @@ class Phase:
     recovery: bool = False
 
 
+@dataclass(frozen=True)
+class SessionOverride:
+    """The coach's word on one session: reclassify it (a planned change of plan,
+    e.g. a fast session instead of sub-T) and/or accept its verdict."""
+    date: date
+    kind: str | None = None          # one of SESSION_KINDS
+    accept: bool = False             # the verdict stands corrected: no red, no alert
+    note: str = ""
+    name: str = ""                   # optional: part of the activity name, when a day has several
+
+
 @dataclass
 class Season:
     week1_start: date | None = None
@@ -212,6 +229,7 @@ class Season:
     weeks: dict[int, dict[str, Any]] = field(default_factory=dict)
     missing: bool = False
     phase_short: dict[str, str] = field(default_factory=dict)   # labels for narrow chart segments
+    sessions: list[SessionOverride] = field(default_factory=list)
 
     def week_number(self, d: date) -> int | None:
         """Season week of day d; None before week 1, so pre-season weeks are
@@ -271,8 +289,13 @@ def load_season(path: Path | None = None) -> Season:
                             threshold=(float(thr[0]), float(thr[1])) if thr else None,
                             recovery=bool(p.get("recovery", False))))
     weeks = {int(w["n"]): w for w in raw.get("week", [])}
+    overrides = [SessionOverride(date=_as_date(o["date"]),
+                                 kind=o.get("kind") if o.get("kind") in SESSION_KINDS else None,
+                                 accept=bool(o.get("accept", False)), note=str(o.get("note", "")),
+                                 name=str(o.get("name", "")))
+                 for o in raw.get("session", []) if o.get("date")]
     w1 = meta.get("week1_start")
     return Season(week1_start=_as_date(w1) if w1 else None,
                   races=sorted(races, key=lambda r: r.date),
-                  phases=sorted(phases, key=lambda p: p.start), weeks=weeks,
+                  phases=sorted(phases, key=lambda p: p.start), weeks=weeks, sessions=overrides,
                   phase_short={str(k).lower(): str(v) for k, v in meta.get("phase_short", {}).items()})

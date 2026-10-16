@@ -78,4 +78,15 @@ targets, dates) are never part of a decision here - they live in the config.
 | Popup opens itself once a day while this or next week lacks a target; FTP alone doesn't open it | Default | Nudge without nagging |
 | Coach answers merged as text with `# coach <date>` and a backup per change | Default | Keep the file readable and reversible |
 
+## Coach verdicts, tolerances, releases
+
+| Decision | By | Why |
+|---|---|---|
+| The coach can reclassify a session or accept its verdict (`[[session]]`) | Owner | Planned changes (a fast session instead of sub-T) shouldn't read as failures |
+| A reclassified or accepted hard session still starts the 48 h window | Default | It was still a hard session for the body |
+| Cap tolerance: reps within `cap_tolerance_bpm` count as within cap, shown amber with their own alert | Owner | A rep 2–3 bpm over the cap isn't the same as 10 over |
+| `threshold_tolerance` widens the band both ways; 0 keeps "judged as written" | Owner | Same idea for weekly targets |
+| One prompt asks for everything; the answer may set any coach-set key, type-checked | Owner | The coach knows more than the dashboard asks for |
+| Alerts can be marked viewed, per browser, keyed by their text | Owner | Acknowledge without hiding a new problem |
+| Semantic-versioned releases with a changelog; version in the header | Owner | Track what changed and check features |
 

@@ -18,9 +18,9 @@ neutral placeholder, not a recommendation.
 | `[sync]` | Garmin token folder; how many days of history are kept and re-pulled |
 | `[coach]` | `ahead_weeks`: how far ahead the Coach popup looks for missing targets |
 | `[health]` | Thresholds on the Health page: resting-HR rise, sleep shortfall, bed/wake consistency |
-| `[threshold]` | HR caps for sub-threshold reps by rep length; how reps are classified against LT pace |
+| `[threshold]` | HR caps for sub-threshold reps by rep length; `cap_tolerance_bpm` (reps just over the cap still count, shown amber); how reps are classified against LT pace |
 | `[easy]`, `[long_run]` | Easy-run and long-run HR caps; share of time allowed above the cap |
-| `[runs]` | Run-day targets; tolerance around the weekly run-km target (also for single-figure threshold bands) |
+| `[runs]` | Run-day targets; `run_km_tolerance` around the weekly run-km target; `threshold_tolerance` around the threshold-km band (0 = as written; a single-figure band then uses the run-km tolerance) |
 | `[bike]` | Bike-hour cap, easy-ride HR cap, ride distance cap, `ftp_w` (your own test only), run-equivalence and running-share rules |
 | `[sleep]` | Bedtime target, what counts as a solid night, solid nights per week |
 | `[readiness]` | Your HRV 7-day target band |
@@ -33,9 +33,12 @@ neutral placeholder, not a recommendation.
 | `[[race]]` | date, name, short name, priority A/B/C (A drives the header countdown), sport |
 | `[[phase]]` | name, start, end, default `run_km` and `threshold` band, `recovery` |
 | `[[week]]` | per-week overrides by week number `n`: `run_km`, `threshold`, `recovery` |
+| `[[session]]` | the coach's word on one session by `date` (optional `name`): `kind` = speed / subt / race / test to reclassify, `accept = true` to accept its verdict, `note`. A reclassified or accepted hard session still starts the 48 h rest window |
 
-Weekly targets and the FTP can be updated from the dashboard's **Coach** popup, which
-edits this file as text (comments survive) and keeps a backup in `private/backups/`.
+Everything the coach decides - weekly targets, session verdicts, races, caps, tolerances,
+sleep and HRV targets, alert texts, the FTP - can be updated from the dashboard's
+**Coach** popup, which edits this file as text (comments survive), keeps a backup in
+`private/backups/` and archives the answer in `private/notes/coach/`.
 
 Changes show up on the next sync, or at once with `./run.sh build`. A change to
 `[app] host`/`port` needs `./run.sh install`.

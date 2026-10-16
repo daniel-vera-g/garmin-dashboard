@@ -9,6 +9,7 @@ Usage is in [../HOWTO.md](../HOWTO.md), setup and the code map in
 | [design.md](design.md) | Why the dashboard works the way it does: metric definitions, display rules |
 | [coach-updates.md](coach-updates.md) | The Coach popup: what it asks, how answers are merged, safety rules |
 | [reference.md](reference.md) | Garmin endpoints and quirks, verification baselines, dev workflow |
+| [releasing.md](releasing.md) | How versions and GitHub releases are made |
 
 **Privacy rule:** everything in this repo is generic. Personal values (HR caps, HRV
 band, races, dates, FTP, plan targets, health readings) and the personal project record

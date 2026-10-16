@@ -135,6 +135,20 @@ class NeverShown(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
+    def test_page_scripts_parse(self):
+        """A broken quote kills every script on the page (sync, alerts, coach)."""
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        for name, html in self.pages.items():
+            js = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+            p = Path(self.tmp.name) / f"{name}.js"
+            p.write_text(js)
+            res = subprocess.run([node, "--check", str(p)], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"{name}: {res.stderr}")
+
     def test_three_pages_built(self):
         self.assertEqual(set(self.pages), {"dashboard.html", "season.html", "health.html"})
 

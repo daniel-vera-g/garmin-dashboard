@@ -33,9 +33,22 @@ badge counts missing values) opens a popup:
 3. **Apply** writes `private/config.toml` (a backup goes to `private/backups/`),
    rebuilds the pages and reloads.
 
-The popup opens by itself, once a day, while this week or next is missing a target.
-Only weekly `run_km`, `threshold`, `recovery` and `[bike] ftp_w` are taken from an
-answer; races, phases and caps are still edited by hand (or ask Claude).
+The prompt asks for everything at once: targets for the coming weeks, the coach's view
+on recent sessions the dashboard flagged (a planned fast session can be reclassified,
+a verdict that's fine can be accepted), all caps and tolerances, races, and anything
+else relevant. The popup opens by itself, once a day, while this week or next is missing
+a target. Phases and gym targets are still edited by hand (or ask Claude).
+
+## Alerts
+
+Open **Alerts** to see what needs attention. **✓** marks an alert as viewed: it moves
+down, greys out and leaves the counts. Click it again to undo. An alert whose wording
+changes (new numbers) shows up as new again. Viewed marks are kept in this browser.
+
+## Version
+
+The header shows the running version (e.g. `v1.1.0`); what changed in each version is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Common changes
 

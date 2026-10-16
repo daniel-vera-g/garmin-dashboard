@@ -22,6 +22,13 @@ import settings as S
 from model import Model, load_model
 
 ROOT = Path(__file__).parent
+
+
+def version() -> str:
+    try:
+        return (ROOT / "VERSION").read_text().strip()
+    except OSError:
+        return "dev"
 DASH = "–"
 NAV = [("home", "Home", "dashboard.html"), ("season", "Season", "season.html"),
        ("health", "Health", "health.html")]
@@ -308,15 +315,25 @@ def week_card(w: M.Week, cfg: dict, m: Model, ts: M.Today, now: datetime) -> str
 </section>"""
 
 
+def alert_id(a: M.Alert) -> str:
+    """Stable while the alert says the same thing; a changed alert is a new one."""
+    import hashlib
+    return hashlib.sha1(f"{a.key}|{a.what}".encode()).hexdigest()[:12]
+
+
 def alerts_card(alerts: list[M.Alert]) -> str:
     if not alerts:
         return ""
-    rows = "".join(f'<li class="al-{a.level}" data-k="{a.key}"><i class="dot"></i><div><div class="al-w">{escape(a.what)}</div>'
-                   f'<div class="al-a">→ {escape(a.action)}</div></div></li>' for a in alerts)
+    rows = "".join(f'<li class="al-{a.level}" data-k="{a.key}" data-id="{alert_id(a)}"><i class="dot"></i>'
+                   f'<div class="al-b"><div class="al-w">{escape(a.what)}</div>'
+                   f'<div class="al-a">→ {escape(a.action)}</div></div>'
+                   f'<button class="al-v" type="button" title="Mark as viewed" aria-pressed="false">✓</button></li>'
+                   for a in alerts)
     n_act = sum(1 for a in alerts if a.level == "act")
     n_warn = sum(1 for a in alerts if a.level == "warn")
-    counts = "".join(f'<span class="al-n al-{lvl}"><i class="dot"></i>{n} {txt}</span>'
+    counts = "".join(f'<span class="al-n al-{lvl}" data-lvl="{lvl}"><i class="dot"></i><b>{n}</b> {txt}</span>'
                      for lvl, n, txt in (("act", n_act, "act now"), ("warn", n_warn, "drifting")) if n)
+    counts += '<span class="al-n al-seen" hidden><b>0</b> viewed</span>'
     # collapsible; the summary keeps the counts visible while closed
     return (f'<details class="card alerts" id="alerts"><summary><h2>Alerts</h2>{counts}'
             f'<span class="chev" aria-hidden="true"></span></summary><ul>{rows}</ul></details>')
@@ -330,7 +347,8 @@ def session_detail(s: M.Session, cfg: dict) -> tuple[str, str]:
         rows = []
         for i, r in enumerate(s.reps, 1):
             if r.kind == "subt":
-                cls = "t-good" if r.within else ("t-act" if r.within is False else "dim")
+                cls = ("t-warn" if r.near else "t-good" if r.within
+                       else ("dim" if s.accepted else "t-act") if r.within is False else "dim")
                 hr = f'<span class="{cls}">{r.avg_hr:.0f}</span> <span class="dim">/ {r.cap}</span>' if r.avg_hr else DASH
             else:
                 hr = f'<span class="dim">{r.avg_hr:.0f} · {r.kind}</span>' if r.avg_hr else r.kind
@@ -364,6 +382,9 @@ def session_detail(s: M.Session, cfg: dict) -> tuple[str, str]:
             bits.append('<span class="dim">No weather data.</span>')
     for note in s.notes:
         bits.append(f'<span class="dim">{escape(note)}.</span>')
+    if s.coach:
+        verdict = " Verdict accepted." if s.accepted else ""
+        bits.insert(0, f'<b>Coach:</b> {escape(s.coach)}.{verdict}')
     bits.append(f'<a href="https://connect.garmin.com/modern/activity/{escape(a.id)}" '
                 f'target="_blank" rel="noopener">Open in Garmin Connect</a>')
     return fig, "".join(f"<p>{b}</p>" if not b.startswith("<table") else b for b in bits)
@@ -377,7 +398,7 @@ def sessions_card(w: M.Week, cfg: dict) -> str:
         dot = (f'<i class="dot st-{st}" title="{STATUS_LABEL[st]}"></i>' if st in STATUS_LABEL
                else '<i class="nodot"></i>')
         rows.append(f'<details class="sess"><summary><span class="sd">{s.act.start:%a}</span>'
-                    f'<span class="stt">{escape(s.title)}</span><span class="sf">{fig}</span>'
+                    f'<span class="stt">{escape(s.title)}{" ✓" if s.accepted else ""}</span><span class="sf">{fig}</span>'
                     f'{dot}</summary><div class="sdet">{detail}</div></details>')
     body = "".join(rows) or '<p class="dim">No sessions yet this week.</p>'
     return f'<section class="card"><h2>Sessions · Mon–Sun</h2>{body}</section>'
@@ -767,6 +788,13 @@ nav a.on{background:var(--ink);color:var(--plane);border-color:var(--ink)}
 .alerts .dot{margin-top:7px}
 .al-act .dot{background:var(--act)}.al-warn .dot{background:var(--warn)}
 .al-w{font-weight:600;font-size:14px}.al-a{font-size:13px;color:var(--ink2)}
+.al-b{flex:1;min-width:0}
+.al-v{flex:none;width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--surface);
+ color:var(--muted);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.al-v:hover{color:var(--ink)}
+.alerts li.seen{opacity:.45}.alerts li.seen .al-v{background:var(--good);border-color:var(--good);color:#fff}
+.al-seen{color:var(--muted);font-weight:500}
+.cnotes{white-space:pre-wrap;font-size:12px;background:var(--plane);border:1px solid var(--line);border-radius:8px;padding:8px;max-height:220px;overflow:auto}
 .sess{border-top:1px solid var(--line)}
 .sess:first-of-type{border-top:0}
 .sess summary{display:grid;grid-template-columns:36px minmax(0,1fr) auto 14px;gap:8px;align-items:center;
@@ -887,6 +915,7 @@ JS = """
     else if(!r.changes.length)h+='<p>Nothing to change: the dashboard already has these values.</p>';
     else h+='<p>'+(applied?'Saved:':'This will change:')+'</p><ul>'+r.changes.map(function(c){return '<li>'+esc(c)+'</li>';}).join('')+'</ul>';
     if(r.warnings&&r.warnings.length)h+='<p class="t-warn">Not taken over:</p><ul>'+r.warnings.map(function(c){return '<li>'+esc(c)+'</li>';}).join('')+'</ul>';
+    if(r.notes)h+='<p>Notes from the coach'+(applied?' (saved to private/notes/coach/)':'')+':</p><pre class="cnotes">'+esc(r.notes)+'</pre>';
     out.innerHTML=h;
   }
   function post(mode){
@@ -909,7 +938,35 @@ JS = """
 })();
 document.querySelectorAll('.scrollx.end').forEach(function(e){e.scrollLeft=e.scrollWidth;});  // newest data in view
 (function(){
+  // alerts marked as viewed: kept per browser, keyed by what the alert says
   var d=document.getElementById('alerts'); if(!d)return;
+  var KEY='alertsViewed',seen={};
+  try{seen=JSON.parse(localStorage.getItem(KEY)||'{}')||{};}catch(e){}
+  var list=d.querySelector('ul'),items=[].slice.call(d.querySelectorAll('li[data-id]'));
+  var live={};items.forEach(function(li){live[li.getAttribute('data-id')]=1;});
+  Object.keys(seen).forEach(function(k){if(!live[k])delete seen[k];});     // forget alerts that are gone
+  function store(){try{localStorage.setItem(KEY,JSON.stringify(seen));}catch(e){}}
+  function render(){
+    var n={act:0,warn:0},v=0;
+    items.forEach(function(li){
+      var on=!!seen[li.getAttribute('data-id')];
+      li.classList.toggle('seen',on);
+      li.querySelector('.al-v').setAttribute('aria-pressed',on?'true':'false');
+      li.querySelector('.al-v').title=on?'Viewed - click to mark as new':'Mark as viewed';
+      if(on)v++;else n[li.classList.contains('al-act')?'act':'warn']++;
+    });
+    // unviewed first, viewed below, each in the original order
+    function isSeen(li){return !!seen[li.getAttribute('data-id')];}
+    items.filter(function(li){return !isSeen(li);}).concat(items.filter(isSeen))
+      .forEach(function(li){list.appendChild(li);});
+    d.querySelectorAll('.al-n[data-lvl]').forEach(function(c){var k=c.getAttribute('data-lvl');c.querySelector('b').textContent=n[k];c.hidden=!n[k];});
+    var s=d.querySelector('.al-seen');s.querySelector('b').textContent=v;s.hidden=!v;
+  }
+  items.forEach(function(li){li.querySelector('.al-v').addEventListener('click',function(e){
+    e.preventDefault();var id=li.getAttribute('data-id');
+    if(seen[id])delete seen[id];else seen[id]=new Date().toISOString().slice(0,10);
+    store();render();});});
+  store();render();
   try{ if(localStorage.getItem('alertsOpen')==='1') d.open=true; }catch(e){}
   function save(){ try{ localStorage.setItem('alertsOpen', d.open?'1':'0'); }catch(e){} }
   d.addEventListener('toggle',save);
@@ -961,7 +1018,7 @@ def coach_dialog(nd: coach.Needs, prompt_text: str) -> tuple[str, str]:
 <div class="row"><button class="btn" id="coachcopy">Copy prompt</button></div>
 <div id="coachpaste">
 <h3>2 · Paste the coach's answer</h3>
-<p>The whole reply is fine. Only the TOML block is read, and only weekly run km, threshold km and FTP are taken over.</p>
+<p>Paste the whole reply. The TOML block updates weekly targets, session verdicts, caps, tolerances, races and the FTP; the coach's notes around it are shown and saved with the update.</p>
 <textarea id="coachans" rows="8" placeholder="Paste the reply here"></textarea>
 <div class="row"><button class="btn" id="coachchk">Check</button><button class="btn" id="coachapply" disabled>Apply</button></div>
 <div id="coachout"></div>
@@ -980,7 +1037,8 @@ def shell(title: str, active: str, header: str, updated: str, body: str, auto_sy
 <title>{escape(title)}</title><style>{CSS}</style></head>
 <body data-auto-sync="{auto_sync:g}"><div class="wrap">
 <header class="top"><div class="hl">{header}</div><nav>{nav}</nav>
-<div class="syncbox"><span id="syncedat" class="dim">updated {updated}</span>
+<div class="syncbox"><span class="dim ver" title="Dashboard version - see CHANGELOG.md">v{version()}</span>
+<span id="syncedat" class="dim">updated {updated}</span>
 {coach_ui[0]}<button id="syncbtn" class="btn" hidden>Sync</button></div></header>
 {body}
 </div>{coach_ui[1]}<div id="tip"></div><script>{JS}</script></body></html>
@@ -1014,7 +1072,7 @@ def build(cache: Path, out: Path, config: Path | None = None,
         updated = "never"
     head = header_line(season, now)
     cu = coach_dialog(coach.needs(season, cfg, now.date(), cfg["coach"]["ahead_weeks"]),
-                      coach.prompt(season, cfg, now.date()))
+                      coach.prompt(season, cfg, now.date(), m))
     pages = {
         "dashboard.html": shell("Training", "home", head, updated, home(m, cfg, season, now), auto, cu),
         "season.html": shell("Season", "season", head, updated, season_page(m, cfg, season, now), auto, cu),

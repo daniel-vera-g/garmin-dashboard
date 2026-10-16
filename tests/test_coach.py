@@ -54,7 +54,7 @@ class Coach(unittest.TestCase):
         self.backups = root / "backups"
 
     def apply(self, text):
-        return coach.apply(coach.parse(text), self.season,
+        return coach.apply(coach.parse(text), self.season, archive=None,
                            now=datetime(2030, 1, 9, 12), backups=self.backups)
 
     def test_prompt_lists_the_coming_weeks_and_what_is_missing(self):
@@ -65,7 +65,7 @@ class Coach(unittest.TestCase):
         p = coach.prompt(sea, cfg, TODAY)
         self.assertIn("Wk1 · Mon 7 Jan · run km 30 · threshold km MISSING", p)
         self.assertIn("Wk2 · Mon 14 Jan · run km 40", p)             # phase default
-        self.assertIn("Bike FTP: MISSING", p)
+        self.assertIn("bike.ftp_w = MISSING", p)
 
     def test_existing_week_is_updated_in_place_and_comments_survive(self):
         changes = self.apply(answer("[[week]]\nn = 1\nrun_km = 35\nthreshold = [4, 6]"))
@@ -106,7 +106,7 @@ class Coach(unittest.TestCase):
                                 "[[week]]\nn = 5\nrun_km = 45\n[race]\nname = 'x'"))
         self.assertEqual(up.weeks, {5: {"run_km": 45.0}})
         joined = " ".join(up.warnings)
-        for bit in ("run_km 'about 50'", "threshold [16, 12]", "ignored 'note'", "ignored 'race'"):
+        for bit in ("run_km 'about 50'", "threshold [16, 12]", "ignored 'note'", "[[race]] entries"):
             self.assertIn(bit, joined)
 
     def test_answers_without_values_are_refused(self):
@@ -120,6 +120,43 @@ class Coach(unittest.TestCase):
                                     self.season, "today")
         self.assertEqual(changes, ["Wk3 run_km: 50 → 55"])
         self.assertEqual(self.season.read_text(), ATHLETE + "\n" + SEASON)
+
+
+    def test_sessions_settings_and_races_are_merged(self):
+        changes = self.apply(answer(
+            '[[session]]\ndate = 2030-01-08\nkind = "speed"\nnote = "planned fast session"\n\n'
+            '[[race]]\ndate = 2030-03-01\nname = "Spring 10k"\npriority = "A"\n\n'
+            '[threshold]\ncap_tolerance_bpm = 2\n\n[runs]\nthreshold_tolerance = 0.1\n\n'
+            '[easy]\nhr_cap_bpm = 142'))
+        self.assertIn("easy.hr_cap_bpm: 140 → 142", changes)
+        self.assertIn("threshold.cap_tolerance_bpm: — → 2", changes)
+        sea, cfg = S.load_season(self.season), S.load_athlete(self.season)
+        self.assertEqual((cfg["easy"]["hr_cap_bpm"], cfg["threshold"]["cap_tolerance_bpm"],
+                          cfg["runs"]["threshold_tolerance"]), (142, 2, 0.1))
+        self.assertEqual(sea.sessions[0].kind, "speed")
+        self.assertEqual([r.name for r in sea.races], ["Spring 10k"])
+        # the same answer again changes nothing
+        self.assertEqual(self.apply(answer('[[session]]\ndate = 2030-01-08\nkind = "speed"\n'
+                                           'note = "planned fast session"\n[easy]\nhr_cap_bpm = 142')), [])
+
+    def test_unknown_or_wrong_typed_settings_are_refused(self):
+        up = coach.parse(answer('[easy]\nhr_cap_bpm = "high"\nnew_rule = 3\n[app]\nport = 80\n'
+                                '[runs]\nthreshold_tolerance = 5\n[[week]]\nn = 2\nrun_km = 40'))
+        self.assertEqual(up.settings, {})
+        joined = " ".join(up.warnings)
+        for bit in ("easy.hr_cap_bpm", "unknown key 'new_rule'", "ignored 'app'", "threshold_tolerance 5"):
+            self.assertIn(bit, joined)
+
+    def test_notes_are_kept_and_archived(self):
+        text = answer("[[week]]\nn = 3\nrun_km = 55") + "\nNOTES: watch the left calf."
+        up = coach.parse(text)
+        self.assertIn("watch the left calf", up.notes)
+        archive = Path(self.tmp.name) / "coach"
+        coach.apply(up, self.season, now=datetime(2030, 1, 9, 12), backups=self.backups,
+                    archive=archive, answer=text)
+        saved = next(archive.iterdir()).read_text()
+        self.assertIn("Wk3 run_km: 50 → 55", saved)
+        self.assertIn("watch the left calf", saved)
 
 
 if __name__ == "__main__":

@@ -89,6 +89,7 @@ settings.py          reads private/config.toml (defaults = config.example.toml)
 serve.py             localhost server for the pages, the Sync button and the coach update
 coach.py             what the plan is missing, the coach prompt, merging the answer
 run.sh               all commands, including the launchd login agent
+VERSION, CHANGELOG.md  release version and per-release changes (docs/releasing.md)
 tests/               unittest suite on synthetic data
 ```
 

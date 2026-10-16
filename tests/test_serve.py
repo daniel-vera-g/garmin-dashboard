@@ -29,7 +29,9 @@ class Serve(unittest.TestCase):
         for k, v in (headers or {}).items():
             c.putheader(k, v)
         c.endheaders(body)
-        status = c.getresponse().status
+        resp = c.getresponse()
+        resp.read()                      # drain it, or the close resets the connection
+        status = resp.status
         c.close()
         return status
 

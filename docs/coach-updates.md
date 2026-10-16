@@ -5,18 +5,19 @@ dashboard generates the prompt and takes the answer back directly.
 
 ## What the coach supplies
 
-Garmin has no access to the plan. The coach supplies the following; everything else
-comes from Garmin or from `private/config.toml`:
+Garmin has no access to the plan or the coach's judgement. One prompt asks for all of it,
+showing the dashboard's current values so the coach can confirm or correct them:
 
-| Value | Stored in | Used for |
+| Prompt section | Answer as | Updates |
 |---|---|---|
-| Weekly run-km target | `private/config.toml` `[[week]] run_km` | Run km cell, trend, season chart |
-| Weekly threshold-km band | `private/config.toml` `[[week]] threshold` | Hero metric, trend |
-| Recovery week flag | `private/config.toml` `[[week]] recovery` | Running-share rule off |
-| Bike FTP (own test only) | `private/config.toml` `[bike] ftp_w` | Bike threshold minutes |
+| A. Weekly targets, this week + `[coach] ahead_weeks` | `[[week]]` n, run_km, threshold, recovery | the weekly cells, hero, trends |
+| B. Recent sessions (14 days) with the dashboard's verdict and the reason | `[[session]]` date, kind and/or accept, note | reclassify a planned change, accept a verdict |
+| C. Rules, caps and tolerances with current values | `[threshold]`, `[easy]`, `[runs]`, `[bike]` … keys | any coach-set setting, incl. `ftp_w` and `[alerts]` texts |
+| D. Races ahead | `[[race]]` date, name, short, priority, sport | season page, race detection |
+| E. Everything else | NOTES after the block | shown before applying, archived |
 
-Races, phases, caps and alert wording are not taken from the popup. They change rarely
-and need judgement, so Claude edits them by hand.
+App, sync and display settings (`[app]`, `[sync]`, `[coach]`, `[health]`), phases and gym
+targets are not taken from an answer; edit them in the config.
 
 ## Flow
 
@@ -28,9 +29,10 @@ and need judgement, so Claude edits them by hand.
    The popup opens automatically once a day (per set of gaps, remembered in
    `localStorage`) while this week or next is missing something. A missing FTP alone
    doesn't open it.
-3. The answer is pasted into the popup. **Check** calls `POST /api/coach/preview`.
-   **Apply** calls `POST /api/coach/apply`, which writes the files and runs
-   `build_dashboard.py`; the page then reloads.
+3. The answer is pasted into the popup. **Check** calls `POST /api/coach/preview` and
+   lists every change, everything not taken over, and the coach's notes. **Apply**
+   calls `POST /api/coach/apply`, which writes the config, archives the full answer in
+   `private/notes/coach/<timestamp>.md` and runs `build_dashboard.py`; the page reloads.
 
 ## Safety rules
 
@@ -40,8 +42,12 @@ and need judgement, so Claude edits them by hand.
   (blocks cross-site requests), body at most 64 KB (413). Error responses close the
   connection.
 - Parsing is strict: exactly one TOML block (or the whole text if none is fenced).
-  Only `[[week]]` with `n` 1–104, `run_km` 0–250, `threshold` [lo, hi] with
-  0 ≤ lo ≤ hi ≤ 60, `recovery` true/false, and `[bike] ftp_w` 50–600 are accepted.
+  `[[week]]`: `n` 1–104, `run_km` 0–250, `threshold` [lo, hi] with 0 ≤ lo ≤ hi ≤ 60,
+  `recovery` true/false. `[[session]]`: a date, `kind` from a fixed list and/or
+  `accept`, text up to 200 characters. `[[race]]`: date and name, priority A/B/C,
+  sport run/bike. Settings: only keys that exist in `settings.DEFAULTS` for a
+  coach-set section, with the default's type (numbers ≥ 0; shares and tolerances ≤ 1;
+  bedtime as HH:MM; texts up to 160 characters); `ftp_w` 50–600 W.
   Everything else is listed under "Not taken over"; nothing is guessed.
   `# threshold = MISSING` comments are ignored by TOML itself.
 - Files are edited **as text**: existing `[[week]]` blocks get the key replaced or

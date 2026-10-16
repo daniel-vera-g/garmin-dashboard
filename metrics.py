@@ -40,6 +40,7 @@ class Rep:
     cap: int
     kind: str                   # subt | speed | aerobic
     within: bool | None         # sub-T reps only; None when HR is missing
+    near: bool = False          # above the cap but inside cap_tolerance_bpm: counts as within
 
 
 def reps_for(act: Activity, lt_pace: float | None, cfg: dict) -> list[Rep]:
@@ -67,10 +68,12 @@ def reps_for(act: Activity, lt_pace: float | None, cfg: dict) -> list[Rep]:
             kind = "aerobic"
         else:
             kind = "subt"
-        within = None
+        within, near = None, False
         if kind == "subt" and lap.avg_hr is not None:
-            within = lap.avg_hr <= cap                    # "under the cap" = at or below it
-        out.append(Rep(lap.n, lap.distance_m, lap.duration_s, pace, lap.avg_hr, cap, kind, within))
+            # "under the cap" = at or below it; within the tolerance counts too, flagged
+            within = lap.avg_hr <= cap + th.get("cap_tolerance_bpm", 0)
+            near = within and lap.avg_hr > cap
+        out.append(Rep(lap.n, lap.distance_m, lap.duration_s, pace, lap.avg_hr, cap, kind, within, near))
     return out
 
 
@@ -127,6 +130,9 @@ class Session:
     hr_above: tuple[float, float] | None = None      # easy runs: (s above, total s)
     flags: list[str] = field(default_factory=list)   # rides
     thr_min: float | None = None                      # rides
+    coach: str = ""                                   # the coach's note from a [[session]] override
+    accepted: bool = False                            # verdict accepted by the coach
+    breached: bool = False                            # reps over the cap before an accept
 
 
 def _rep_title(reps: list[Rep], label: str) -> str:
@@ -139,6 +145,35 @@ def _rep_title(reps: list[Rep], label: str) -> str:
         rounded = int(round(typical / 100.0) * 100) or int(typical)
         return f"{label} {len(reps)}×{rounded}"
     return f"{label} {len(reps)} reps · {sum(dists) / 1000:.1f} km"
+
+
+def _apply_override(sessions: list[Session], o: S.SessionOverride) -> None:
+    """The coach's word on a session. Picks the day's run with reps (or the day's
+    only session), optionally by part of its name, then reclassifies and/or
+    accepts it. The reps and HRs stay visible; only the judgement changes."""
+    day = [s for s in sessions if s.act.day == o.date
+           and (not o.name or o.name.lower() in (s.act.name or "").lower())]
+    target = next((s for s in day if s.reps), day[0] if len(day) == 1 else None)
+    if target is None:
+        return
+    s = target
+    s.coach = o.note or "coach override"
+    if o.kind and o.kind != s.kind:
+        if o.kind == "speed":
+            for r in s.reps:
+                if r.kind == "subt":
+                    r.kind, r.within, r.near = "speed", None, False
+            s.title = _rep_title([r for r in s.reps if r.kind == "speed"], "Speed")
+        elif o.kind == "subt":
+            pass                                   # sub-T needs the cap check; keep the reps as read
+        else:
+            s.title = f"{o.kind.title()} {s.act.km:.1f} km"
+        if o.kind != "subt":
+            s.kind, s.within_km, s.over_km, s.status = o.kind, 0.0, 0.0, "good"
+    if o.accept:
+        s.breached = s.over_km > 0
+        s.accepted, s.over_km = True, 0.0
+        s.status = "good"
 
 
 def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) -> list[Session]:
@@ -188,6 +223,8 @@ def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) ->
                         s.status = "act"
                     elif sub and all(r.within is None for r in sub):
                         s.status = "none"
+                    elif any(r.near for r in sub):
+                        s.status = "warn"                 # within the tolerance, not under the cap
                     else:
                         s.status = "good"
                     out.append(s)
@@ -216,6 +253,9 @@ def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) ->
             out.append(Session(a, "gym", "Gym", status="good"))
         else:
             out.append(Session(a, "other", a.name or a.type.replace("_", " ").title()))
+
+    for o in season.sessions:
+        _apply_override(out, o)
 
     # bike discipline needs the whole week's sessions
     bc = cfg["bike"]
@@ -336,7 +376,8 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     band = tg["threshold"]
     # A range is judged as written. A single planned figure ([10, 10]) gets the
     # run-km tolerance, or 0.1 km short would fail the week.
-    tol = cfg["runs"]["run_km_tolerance"] if band and band[0] == band[1] else 0.0
+    tol = cfg["runs"].get("threshold_tolerance", 0.0) or (
+        cfg["runs"]["run_km_tolerance"] if band and band[0] == band[1] else 0.0)
     if band is None:
         thr_status = "neutral"
     elif within > band[1] * (1 + tol):
@@ -632,9 +673,9 @@ def hard_session(model: Model, cfg: dict, season: S.Season, now: datetime,
     sess = [s for s in sess if s.act.end <= now]
     # Every sub-T session starts the 24 h window, including one recorded without
     # heart rate: its cap can't be checked, but it was still a hard session.
-    subt_ok = [s for s in sess if s.kind == "subt" and s.over_km == 0]
+    subt_ok = [s for s in sess if s.kind == "subt" and s.over_km == 0 and not s.breached]
     heavy = [s for s in sess if s.kind in ("speed", "race", "test")
-             or (s.kind == "subt" and s.over_km > 0)]
+             or (s.kind == "subt" and (s.over_km > 0 or s.breached))]   # accepted or not, it was hard
     if subt_ok:
         last = max(subt_ok, key=lambda s: s.act.end)
         opens = last.act.end + timedelta(hours=hc["hours_after_subt"])
@@ -760,6 +801,13 @@ def week_alerts(week: Week, cfg: dict) -> list[Alert]:
             caps = sorted({r.cap for r in s.reps if r.within is False})
             out.append(Alert("act", f"Cap breached {s.act.day:%a} — reps {hrs} vs cap {'/'.join(map(str, caps))}",
                              S.action(cfg, "over_cap"), "over_cap"))
+    for s in week.sessions:
+        if s.kind == "subt" and s.status == "warn":
+            hrs = "·".join(f"{r.avg_hr:.0f}" for r in s.reps if r.near)
+            caps = sorted({r.cap for r in s.reps if r.near})
+            out.append(Alert("warn", f"Near the cap {s.act.day:%a} — reps {hrs} vs cap {'/'.join(map(str, caps))}"
+                                     f" (+{cfg['threshold'].get('cap_tolerance_bpm', 0)} allowed)",
+                             S.action(cfg, "near_cap"), "near_cap"))
     for s in week.easy_failed:
         bits = [f"avg {shown(s.act.avg_hr, cfg['easy']['hr_cap_bpm'])}"] if s.act.avg_hr else []
         if s.hr_above:

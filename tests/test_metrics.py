@@ -500,6 +500,57 @@ class RecoveryAcrossMidnight(unittest.TestCase):
         self.assertEqual(rec.state, "fail")
 
 
+class TolerancesAndOverrides(unittest.TestCase):
+    """Coach-set slack around caps and targets, and the coach's word on a session."""
+
+    def test_rep_just_over_the_cap_counts_inside_the_tolerance(self):
+        q = subt_session(1, [164, 167, 169])                       # cap 165 for 1600 m reps
+        c = cfg(threshold={"cap_tolerance_bpm": 3})
+        s = M.classify([q], model(q), c, season())[0]
+        self.assertEqual([r.within for r in s.reps], [True, True, False])
+        self.assertEqual([r.near for r in s.reps], [False, True, False])
+        self.assertAlmostEqual(s.within_km, 3.2)
+        self.assertEqual(s.status, "act")                          # 169 is past cap + 3
+        q2 = subt_session(1, [164, 167])
+        s2 = M.classify([q2], model(q2), c, season())[0]
+        self.assertEqual(s2.status, "warn")
+        wk = M.week_summary(MON, model(q2), c, season(), SUN_NIGHT)
+        alerts = M.alerts(wk, model(q2), c, SUN_NIGHT)
+        self.assertTrue(any(a.key == "near_cap" and "+3 allowed" in a.what for a in alerts))
+        self.assertFalse(any(a.key == "over_cap" for a in alerts))
+
+    def test_threshold_tolerance_widens_a_range(self):
+        sea = season(phases=[S.Phase("P", MON, MON + timedelta(days=6), threshold=(12, 16))])
+        m = model(subt_session(1, [150] * 7))                      # 11.2 km
+        self.assertEqual(M.week_summary(MON, m, cfg(), sea, SUN_NIGHT).threshold.status, "warn")
+        loose = cfg(runs={"threshold_tolerance": 0.1})             # 12 x 0.9 = 10.8
+        self.assertEqual(M.week_summary(MON, m, loose, sea, SUN_NIGHT).threshold.status, "good")
+
+    def test_coach_reclassifies_a_planned_fast_session(self):
+        q = subt_session(3, [177, 181], hour=18)
+        sea = season(sessions=[S.SessionOverride(q.day, kind="speed", note="planned: fast session")])
+        s = M.classify([q], model(q), cfg(), sea)[0]
+        self.assertEqual((s.kind, s.over_km, s.within_km, s.status), ("speed", 0.0, 0.0, "good"))
+        self.assertEqual(s.coach, "planned: fast session")
+        wk = M.week_summary(MON, model(q), cfg(), sea, SUN_NIGHT)
+        self.assertFalse(any(a.key == "over_cap" for a in M.alerts(wk, model(q), cfg(), SUN_NIGHT)))
+        # still a hard session: 48 h before the next one
+        today = MON + timedelta(days=4)
+        m = model(q, nights=[night(today), night(today - timedelta(days=1))], readiness=readiness(today))
+        hs = M.hard_session(m, cfg(), sea, datetime.combine(today, time(9)))
+        self.assertEqual(hs.opens, q.end + timedelta(hours=48))
+
+    def test_accepted_verdict_is_green_but_still_hard(self):
+        q = subt_session(1, [168, 170], hour=18)
+        sea = season(sessions=[S.SessionOverride(q.day, accept=True, note="close enough")])
+        s = M.classify([q], model(q), cfg(), sea)[0]
+        self.assertEqual((s.kind, s.status, s.over_km, s.accepted, s.breached), ("subt", "good", 0.0, True, True))
+        today = MON + timedelta(days=2)
+        m = model(q, nights=[night(today), night(today - timedelta(days=1))], readiness=readiness(today))
+        hs = M.hard_session(m, cfg(), sea, datetime.combine(today, time(9)))
+        self.assertEqual(hs.opens, q.end + timedelta(hours=48))
+
+
 class ConfigNotTracked(unittest.TestCase):
     """Values from the personal, gitignored configs must not appear in tracked files."""
 
