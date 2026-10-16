@@ -1,0 +1,17 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+
+# generated pages - they contain health data
+/*.html
+
+# everything personal: config (copy config.example.toml), notes, backups
+private/
+# old config file names, in case a copy is left around
+athlete.toml
+season.toml
+config.toml
+.worktrees/

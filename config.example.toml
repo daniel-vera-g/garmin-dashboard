@@ -1,0 +1,164 @@
+# Dashboard configuration - the one place for every personal value.
+#
+# Copy to private/config.toml and fill in your own values:
+#     mkdir -p private && cp config.example.toml private/config.toml
+# private/ is gitignored (config, personal notes, backups). Every value here is a
+# neutral placeholder - none of them is a recommendation. Missing keys fall back
+# to the same defaults (settings.DEFAULTS).
+
+# ---------------------------------------------------------------- app
+[app]
+host = "127.0.0.1"          # loopback only (127.0.0.1, localhost, ::1) - the server refuses anything else
+port = 8765
+auto_sync_hours = 6         # sync on page open when the data is older; 0 = never
+carryover_days = 2          # Mon(+Tue): last week's missed targets stay in the alerts
+
+[sync]
+tokenstore = "~/.garminconnect"
+detail_days = 91            # per-activity data and load history
+wellness_days = 120         # sleep/HRV history (the health page needs 90)
+recent_activity_days = 21
+recent_wellness_days = 10
+
+[coach]
+ahead_weeks = 4             # Coach popup: the current week plus this many
+
+[health]
+rhr_rise_bpm = 5            # 3-night resting HR this far above the 30-day mean -> amber
+sleep_short_h = 0.5         # 30-night sleep this far under Garmin's need -> amber
+consistency_good_min = 45   # bed/wake drift under this -> green
+consistency_warn_min = 75   # under this -> amber, above -> red
+
+# ---------------------------------------------------------------- athlete
+[threshold]
+cap_long_bpm = 165          # HR cap for reps >= long_rep_m
+cap_short_bpm = 170         # HR cap for shorter reps
+long_rep_m = 1200
+subt_max_slower_s = 30      # reps slower than LT pace + this are aerobic, not reps
+speed_margin_s = 8          # median rep this much faster than LT pace = speed session
+min_rep_m = 100             # ACTIVE laps shorter than this are lap-button artefacts
+min_rep_s = 30
+
+[easy]
+hr_cap_bpm = 140            # easy runs: average HR at or below
+max_share_above = 0.10      # and under 10 % of the time above it
+
+[long_run]
+hr_cap_bpm = 140
+min_minutes = 60            # the week's longest unstructured run counts as the long run from here
+
+[runs]
+run_days_target = 6
+run_days_min = 5
+run_km_tolerance = 0.10     # +/- 10 % around the weekly target
+
+[bike]
+max_hours = 3.0
+easy_hr_cap_bpm = 125
+max_km = 60.0
+# ftp_w = 250               # set once you have a test value; Garmin's FTP is never used
+threshold_pct = 0.88
+hilly_m_per_km = 10.0       # rides at or above this count as hilly
+run_equiv_flat = 3.5        # bike km per running km
+run_equiv_hilly = 3.0
+min_run_share = 0.65
+min_volume_for_share_km = 25.0
+
+[sleep]
+bedtime_target = "23:00"
+solid_score = 70
+solid_hours = 6.5
+solid_nights_target = 5
+
+[readiness]
+hrv_low = 55
+hrv_high = 65
+
+[load]
+acwr_low = 0.8
+acwr_high = 1.3
+
+[pace_at_hr]
+hr_low = 135
+hr_high = 140
+skip_first_min = 10
+max_temp_c = 20.0
+max_elev_m_per_km = 5.0     # "flat"
+min_minutes_in_band = 5.0
+hours_after_quality = 24     # runs this soon after a quality session are excluded
+
+[hard_session]
+hours_after_subt = 24
+hours_after_overcap_race_test = 48
+max_recovery_hours = 24
+
+[gym]
+# First entry whose `until` date has not passed applies, e.g.
+#   targets = [ { until = 2030-01-31, per_week = 3 }, { per_week = 2 } ]
+targets = [ { per_week = 2 } ]
+
+# The "-> what to do" line under each alert. Put your coach's wording here.
+# {easy_hr_cap_bpm}, {max_km}, {bedtime_target} ... are filled in from the settings.
+[alerts]
+over_cap = "Ease off inside the rep. Next hard day +48 h"
+easy = "Easy profile, no pace field"
+run_share = "Running floor first"
+bike_hours = "No more riding this week"
+long_run = "Slower long run — HR under the cap"
+run_km = "Back to the weekly target"
+run_days = "Spread the running over more days"
+threshold_low = "Protect the sub-T sessions next week"
+threshold_high = "No more sub-T this week"
+solid_nights = "Prioritize sleep before the next quality session"
+gym = "Plan the remaining gym sessions"
+readiness_poor = "No hard session today"
+readiness_low = "Keep today's session easy"
+recovery = "No hard session before then"
+hrv_low = "Keep it easy until HRV is back in range"
+hrv_high = "Note it in the weekly check-in"
+sleep_history = "Prioritize an earlier, longer night"
+night = "Prioritize an earlier, longer night"
+bedtime = "Two good nights before quality"
+acwr = "Hold this level two weeks"
+discipline_hard_run = "Keep hard-run days run-only"
+discipline_long_run = "Rest the legs before the long run"
+discipline_easy_ride = "Ride easier — HR under {easy_hr_cap_bpm}"
+discipline_distance = "Keep rides under {max_km:.0f} km"
+
+# ---------------------------------------------------------------- season plan
+# Week 1 starts on week1_start (a Monday); weeks are numbered from there.
+# Weekly targets and the FTP can also be updated from the dashboard's Coach popup.
+[season]
+week1_start = 2030-01-07
+phase_short = { recovery = "Rec", taper = "Tpr" }   # labels when a phase segment is narrow
+
+[[race]]
+date = 2030-04-06
+name = "Example Parkrun"
+short = "5k"
+priority = "C"
+
+[[race]]
+date = 2030-05-12
+name = "Example 10k"
+short = "10k"
+priority = "A"              # A races drive the header countdown
+
+[[phase]]
+name = "Speed"
+start = 2030-03-18
+end = 2030-05-12
+run_km = 60                 # default weekly running target in this phase
+threshold = [8, 12]         # default threshold-km band in this phase
+
+[[phase]]
+name = "Recovery"
+start = 2030-05-13
+end = 2030-05-26
+recovery = true             # running-share rule is off in recovery phases
+
+# Optional per-week overrides
+[[week]]
+n = 12
+run_km = 55
+threshold = [12, 16]
