@@ -41,6 +41,7 @@ class Rep:
     kind: str                   # subt | speed | aerobic
     within: bool | None         # sub-T reps only; None when HR is missing
     near: bool = False          # above the cap but inside cap_tolerance_bpm: counts as within
+    pace_verdict: str | None = None   # speed reps with a planned pace band: good | warn | act
 
 
 def reps_for(act: Activity, lt_pace: float | None, cfg: dict) -> list[Rep]:
@@ -71,7 +72,10 @@ def reps_for(act: Activity, lt_pace: float | None, cfg: dict) -> list[Rep]:
         within, near = None, False
         if kind == "subt" and lap.avg_hr is not None:
             # "under the cap" = at or below it; within the tolerance counts too, flagged
-            within = lap.avg_hr <= cap + th.get("cap_tolerance_bpm", 0)
+            long_rep = lap.distance_m >= th["long_rep_m"]
+            tol = max(th.get("cap_tolerance_bpm", 0),
+                      th.get("cap_tolerance_long_bpm" if long_rep else "cap_tolerance_short_bpm", 0))
+            within = lap.avg_hr <= cap + tol
             near = within and lap.avg_hr > cap
         out.append(Rep(lap.n, lap.distance_m, lap.duration_s, pace, lap.avg_hr, cap, kind, within, near))
     return out
@@ -147,7 +151,7 @@ def _rep_title(reps: list[Rep], label: str) -> str:
     return f"{label} {len(reps)} reps · {sum(dists) / 1000:.1f} km"
 
 
-def _apply_override(sessions: list[Session], o: S.SessionOverride) -> None:
+def _apply_override(sessions: list[Session], o: S.SessionOverride, pace_tol: float = 3) -> None:
     """The coach's word on a session. Picks the day's run with reps (or the day's
     only session), optionally by part of its name, then reclassifies and/or
     accepts it. The reps and HRs stay visible; only the judgement changes."""
@@ -170,6 +174,16 @@ def _apply_override(sessions: list[Session], o: S.SessionOverride) -> None:
             s.title = f"{o.kind.title()} {s.act.km:.1f} km"
         if o.kind != "subt":
             s.kind, s.within_km, s.over_km, s.status = o.kind, 0.0, 0.0, "good"
+    if o.pace and s.kind == "speed":
+        # speed reps are judged on pace against the planned band, not on HR
+        fast, slow = o.pace
+        for r in s.reps:
+            if r.kind != "speed" or r.pace is None:
+                continue
+            off = max(fast - r.pace, r.pace - slow, 0.0)
+            r.pace_verdict = "good" if off == 0 else ("warn" if off <= pace_tol else "act")
+        verdicts = [r.pace_verdict for r in s.reps if r.pace_verdict]
+        s.status = worst(*verdicts) if verdicts else s.status
     if o.accept:
         s.breached = s.over_km > 0
         s.accepted, s.over_km = True, 0.0
@@ -232,7 +246,7 @@ def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) ->
             if a.id == long_id:
                 s = Session(a, "long", f"Long {a.km:.1f} km")
                 cap = cfg["long_run"]["hr_cap_bpm"]
-                s.status = "none" if a.avg_hr is None else ("warn" if a.avg_hr > cap else "good")
+                s.status = "none" if a.avg_hr is None else ("act" if a.avg_hr > cap else "good")
                 out.append(s)
                 continue
             s = Session(a, "easy", f"{'Treadmill' if a.indoor else 'Easy'} {a.km:.1f} km")
@@ -242,6 +256,8 @@ def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) ->
                 s.status = "none"
             elif a.avg_hr > ec["hr_cap_bpm"] or (share is not None and share >= ec["max_share_above"]):
                 s.status = "act"
+            elif share is not None and ec.get("share_green") and share >= ec["share_green"]:
+                s.status = "warn"                 # inside the amber zone of time above the cap
             else:
                 s.status = "good" if share is not None else "none"   # share unknown: no data, not "fine"
                 if share is None:
@@ -255,7 +271,7 @@ def classify(acts: list[Activity], model: Model, cfg: dict, season: S.Season) ->
             out.append(Session(a, "other", a.name or a.type.replace("_", " ").title()))
 
     for o in season.sessions:
-        _apply_override(out, o)
+        _apply_override(out, o, cfg.get("speed", {}).get("pace_tolerance_s", 3))
 
     # bike discipline needs the whole week's sessions
     bc = cfg["bike"]
@@ -325,6 +341,7 @@ class Week:
     easy_avg_hr: Metric             # pooled over the week's easy runs
     easy_share: Metric
     easy_failed: list[Session]      # every easy run is judged on its own
+    easy_drift: list[Session]       # easy runs in the amber zone
     easy: Metric                    # the cell's verdict: worst of pooled and per-run
     discipline_m: Metric            # count of discipline flags, 0 is the target
     bike_hours: Metric
@@ -333,6 +350,23 @@ class Week:
     solid_nights: Metric
     gym: Metric
     discipline: list[tuple[Session, str]]
+
+
+def band_verdict(v: float, lo: float, hi: float, green: float, under: float, over: float,
+                 complete: bool) -> str:
+    """Three levels around a weekly target [lo, hi]: within +/- green -> good;
+    within the amber zone (-under, +over) -> warn; beyond -> act. With no amber
+    zone set (0), everything outside green is warn, as before. Going over flags at
+    once, like a cap; falling short only once the week is over."""
+    zone = under > 0 or over > 0
+    eps = 1e-9                     # 3 x 1.6 km must sit on a -25 % edge of 6.4, not below it
+    if v > hi * (1 + green) + eps:
+        return "act" if zone and v > hi * (1 + max(over, green)) + eps else "warn"
+    if v >= lo * (1 - green) - eps:
+        return "good"
+    if not complete:
+        return "neutral"
+    return "act" if zone and v < lo * (1 - max(under, green)) - eps else "warn"
 
 
 def worst(*statuses: str) -> str:
@@ -378,31 +412,20 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     # run-km tolerance, or 0.1 km short would fail the week.
     tol = cfg["runs"].get("threshold_tolerance", 0.0) or (
         cfg["runs"]["run_km_tolerance"] if band and band[0] == band[1] else 0.0)
-    if band is None:
-        thr_status = "neutral"
-    elif within > band[1] * (1 + tol):
-        thr_status = "warn"                         # above the band flags at once, like a cap;
-                                                    # in a [0, 0] week any sub-T km is above it
-    elif within >= band[0] * (1 - tol):
-        thr_status = "good"
-    elif complete:
-        thr_status = "warn"
-    else:
-        thr_status = "neutral"
+    rc_ = cfg["runs"]
+    thr_status = "neutral" if band is None else band_verdict(
+        within, band[0], band[1], tol, rc_.get("threshold_amber_under", 0.0),
+        rc_.get("threshold_amber_over", 0.0), complete)
     threshold = Metric(within, band, thr_status, sum(s.within_km for s in prev_sessions))
     over_cap = Metric(over, 0, "act" if over > 0 else "good", sum(s.over_km for s in prev_sessions))
 
     runs = [s for s in sessions if s.act.sport == "run"]
     run_km_v = sum(s.act.km for s in runs)
     rk_t, tol = tg["run_km"], cfg["runs"]["run_km_tolerance"]
-    if rk_t is None:
-        rk_status = "neutral"                  # no target: nothing to judge, not "no data"
-    elif run_km_v > rk_t * (1 + tol):
-        rk_status = "warn"
-    elif complete:
-        rk_status = "warn" if run_km_v < rk_t * (1 - tol) else "good"
-    else:
-        rk_status = "good" if run_km_v >= rk_t * (1 - tol) else "neutral"
+    # no target: nothing to judge, not "no data"
+    rk_status = "neutral" if rk_t is None else band_verdict(
+        run_km_v, rk_t, rk_t, tol, cfg["runs"].get("run_km_amber_under", 0.0),
+        cfg["runs"].get("run_km_amber_over", 0.0), complete)
     run_km = Metric(run_km_v, rk_t, rk_status,
                     sum(a.km for a in prev_acts if a.sport == "run"))
 
@@ -429,6 +452,7 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     # "every easy run passed", which the failed list carries. A pooled failure
     # always implies a failed run, so the two can't disagree in the red direction.
     easy_failed = [s for s in easy if s.status == "act"]
+    easy_drift = [s for s in easy if s.status == "warn"]
     easy_avg_hr = Metric(easy_hr, ec["hr_cap_bpm"],
                          "none" if easy_hr is None and easy else
                          ("act" if easy_hr is not None and easy_hr > ec["hr_cap_bpm"]
@@ -436,6 +460,7 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     easy_share = Metric(share, ec["max_share_above"],
                         "none" if share is None and easy else
                         ("act" if share is not None and share >= ec["max_share_above"]
+                         else "warn" if share is not None and ec.get("share_green") and share >= ec["share_green"]
                          else ("good" if easy else "neutral")))
 
     rides = [s for s in sessions if s.act.sport == "bike"]
@@ -466,11 +491,21 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     sc = cfg["sleep"]
     nights = [model.nights.get(week_start + timedelta(days=i)) for i in range(7)]
     nights = [n for n in nights if n and n.day <= now.date()]
-    solid = sum(1 for n in nights if is_solid(n, cfg))
+    levels = [night_level(n, cfg) for n in nights]
+    solid = levels.count("good")
+    ok = solid + levels.count("warn")
     # nights still to come this week: the rest of the week, plus last night if not synced yet
     nights_left = 0 if complete else days_left + (0 if now.date() in {n.day for n in nights} else 1)
-    solid_nights = Metric(solid, sc["solid_nights_target"],
-                          _goal_status(solid, sc["solid_nights_target"], nights_left))
+    target, ok_target = sc["solid_nights_target"], sc.get("ok_nights_target", 0)
+    if solid >= target:
+        sn_status = "good"
+    elif ok_target and ok >= ok_target and solid + nights_left < target:
+        sn_status = "warn"           # short of solid nights, but enough solid-or-amber ones
+    elif solid + nights_left < target and (not ok_target or ok + nights_left < ok_target):
+        sn_status = "act" if ok_target else "warn"
+    else:
+        sn_status = "neutral"
+    solid_nights = Metric(solid, target, sn_status, note=f"{ok} solid or amber" if ok_target else "")
 
     gt = S.gym_target(cfg, week_start)
     g = sum(1 for s in sessions if s.kind == "gym")
@@ -481,9 +516,10 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
     discipline = [(s, f) for s in rides for f in s.flags]
     return Week(week_start, season.week_number(week_start), tg["phase"], tg["recovery"], complete,
                 days_left, sessions, threshold, over_cap, run_km, run_days, long_run,
-                easy_avg_hr, easy_share, easy_failed,
+                easy_avg_hr, easy_share, easy_failed, easy_drift,
                 Metric(len(easy_failed), 0, worst(easy_avg_hr.status, easy_share.status,
-                                                  "act" if easy_failed else "good") if easy else "neutral"),
+                                                  "act" if easy_failed else "warn" if easy_drift else "good")
+                       if easy else "neutral"),
                 Metric(len(discipline), 0, "warn" if discipline else "good"), bike_hours, run_share, bike_thr, solid_nights, gym,
                 discipline)
 
@@ -491,6 +527,22 @@ def week_summary(week_start: date, model: Model, cfg: dict, season: S.Season,
 # --------------------------------------------------------------------------
 # sleep, load, readiness
 # --------------------------------------------------------------------------
+def night_level(n: Night | None, cfg: dict) -> str | None:
+    """good = solid; warn = amber (if an amber night is configured); act = below."""
+    s = is_solid(n, cfg)
+    if s is None:
+        return None
+    if s:
+        return "good"
+    sc = cfg["sleep"]
+    if sc.get("amber_score") and n.score >= sc["amber_score"] and n.hours >= sc.get("amber_hours", 0):
+        return "warn"
+    return "act"
+
+
+READINESS_RANK = {"POOR": 0, "LOW": 1, "MODERATE": 2, "HIGH": 3, "PRIME": 4}
+
+
 def is_solid(n: Night | None, cfg: dict) -> bool | None:
     if n is None or n.score is None or n.hours is None:
         return None
@@ -648,10 +700,19 @@ def hard_session(model: Model, cfg: dict, season: S.Season, now: datetime,
 
     n1, n2 = model.nights.get(today), model.nights.get(today - timedelta(days=1))
     s1, s2 = is_solid(n1, cfg), is_solid(n2, cfg)
+    l1, l2 = night_level(n1, cfg), night_level(n2, cfg)
+    reds = [l1, l2].count("act")
+    need_level = hc.get("red_night_ok_readiness", "")
+    ready = READINESS_RANK.get(((r.level if r else None) or "").upper(), -1)
     if s1 is None or s2 is None:
         checks.append(Check("Two solid nights", "nodata", "sleep missing for a night"))
     elif s1 and s2:
         checks.append(Check("Two solid nights", "ok", "last two nights solid"))
+    elif reds == 0:
+        checks.append(Check("Two solid nights", "ok", "both nights at least amber"))
+    elif reds == 1 and need_level and ready >= READINESS_RANK.get(need_level.upper(), 99):
+        checks.append(Check("Two solid nights", "ok",
+                            f"one red night, readiness {r.level.title()} (≥ {need_level.title()} allows it)"))
     else:
         # name the night by its evening and say what missed, so "not solid" can't
         # be read as contradicting "last night ... solid" right below it
@@ -797,17 +858,32 @@ def week_alerts(week: Week, cfg: dict) -> list[Alert]:
     out: list[Alert] = []
     for s in week.sessions:
         if s.kind == "subt" and s.over_km > 0:
-            hrs = "·".join(f"{r.avg_hr:.0f}" for r in s.reps if r.kind == "subt" and r.avg_hr)
-            caps = sorted({r.cap for r in s.reps if r.within is False})
-            out.append(Alert("act", f"Cap breached {s.act.day:%a} — reps {hrs} vs cap {'/'.join(map(str, caps))}",
-                             S.action(cfg, "over_cap"), "over_cap"))
+            red = [r for r in s.reps if r.within is False]
+            near = [r for r in s.reps if r.near]
+            caps = sorted({r.cap for r in red})
+            what = (f"Cap breached {s.act.day:%a} — rep{'s' if len(red) > 1 else ''} "
+                    + "·".join(f"{r.avg_hr:.0f}" for r in red) + f" vs cap {'/'.join(map(str, caps))}")
+            if near:
+                what += " (" + "·".join(f"{r.avg_hr:.0f}" for r in near) + " inside the tolerance)"
+            out.append(Alert("act", what, S.action(cfg, "over_cap"), "over_cap"))
     for s in week.sessions:
         if s.kind == "subt" and s.status == "warn":
             hrs = "·".join(f"{r.avg_hr:.0f}" for r in s.reps if r.near)
             caps = sorted({r.cap for r in s.reps if r.near})
             out.append(Alert("warn", f"Near the cap {s.act.day:%a} — reps {hrs} vs cap {'/'.join(map(str, caps))}"
-                                     f" (+{cfg['threshold'].get('cap_tolerance_bpm', 0)} allowed)",
-                             S.action(cfg, "near_cap"), "near_cap"))
+                                     " (inside the tolerance)", S.action(cfg, "near_cap"), "near_cap"))
+    for s in week.sessions:
+        bad = [r for r in s.reps if r.pace_verdict in ("warn", "act")]
+        if s.kind == "speed" and bad and not s.accepted:
+            out.append(Alert(worst(*(r.pace_verdict for r in bad)),
+                             f"Off pace {s.act.day:%a} — reps " + "·".join(_mmss(r.pace) for r in bad),
+                             S.action(cfg, "pace"), "pace"))
+    for s in week.easy_drift:
+        share = s.hr_above[0] / s.hr_above[1] if s.hr_above else None
+        out.append(Alert("warn", f"Easy run drifting {s.act.day:%a} — "
+                                 + (f"{shown(share, cfg['easy']['share_green'], pct=True)} above {cfg['easy']['hr_cap_bpm']}"
+                                    if share is not None else "HR near the cap"),
+                         S.action(cfg, "easy_drift"), "easy"))
     for s in week.easy_failed:
         bits = [f"avg {shown(s.act.avg_hr, cfg['easy']['hr_cap_bpm'])}"] if s.act.avg_hr else []
         if s.hr_above:
@@ -830,36 +906,44 @@ def week_alerts(week: Week, cfg: dict) -> list[Alert]:
     for s, flag in week.discipline:
         act = next((v for k, v in actions.items() if k in flag), "")
         out.append(Alert("warn", f"Bike discipline {s.act.day:%a} — {flag}", act, "discipline"))
-    if week.long_run and week.long_run.status == "warn":
-        out.append(Alert("warn", f"Long run avg HR {shown(week.long_run.act.avg_hr, cfg['long_run']['hr_cap_bpm'])}"
+    if week.long_run and week.long_run.status in ("warn", "act"):
+        out.append(Alert(week.long_run.status, f"Long run avg HR {shown(week.long_run.act.avg_hr, cfg['long_run']['hr_cap_bpm'])}"
                                  f" > {cfg['long_run']['hr_cap_bpm']}",
                          S.action(cfg, "long_run"), "long_run"))
     out += target_alerts(week, cfg)
     return out
 
 
+def _mmss(sec: float | None) -> str:
+    if sec is None:
+        return "–"
+    s = int(round(sec))
+    return f"{s // 60}:{s % 60:02d}"
+
+
 def target_alerts(week: Week, cfg: dict) -> list[Alert]:
     """Shortfalls against the week's targets - the part of a week's verdict that
     is still worth knowing after the week has ended."""
     out: list[Alert] = []
-    if week.run_km.status == "warn" and week.run_km.target:
+    if week.run_km.status in ("warn", "act") and week.run_km.target:
         diff = (week.run_km.value - week.run_km.target) / week.run_km.target
-        out.append(Alert("warn", f"Run km {week.run_km.value:.0f} / {week.run_km.target:.0f} ({diff:+.0%})",
+        out.append(Alert(week.run_km.status, f"Run km {week.run_km.value:.0f} / {week.run_km.target:.0f} ({diff:+.0%})",
                          S.action(cfg, "run_km"), "run_km"))
     if week.run_days.status == "warn":
         out.append(Alert("warn", f"Run days {week.run_days.value:.0f} / {cfg['runs']['run_days_target']}",
                          S.action(cfg, "run_days"), "run_days"))
-    if week.threshold.status == "warn" and week.threshold.target is not None:
+    if week.threshold.status in ("warn", "act") and week.threshold.target is not None:
         lo, hi = week.threshold.target
+        lvl = week.threshold.status
         if week.threshold.value > hi:
             what = "no sub-T planned" if hi == 0 else f"above band — {week.threshold.value:.1f} / {band_text(lo, hi)}"
-            out.append(Alert("warn", f"Threshold km {what}" + (f" ({week.threshold.value:.1f} km)" if hi == 0 else ""),
+            out.append(Alert(lvl, f"Threshold km {what}" + (f" ({week.threshold.value:.1f} km)" if hi == 0 else ""),
                              S.action(cfg, "threshold_high"), "threshold"))
         else:
-            out.append(Alert("warn", f"Threshold km below band — {week.threshold.value:.1f} / {band_text(lo, hi)}",
+            out.append(Alert(lvl, f"Threshold km below band — {week.threshold.value:.1f} / {band_text(lo, hi)}",
                              S.action(cfg, "threshold_low"), "threshold"))
-    if week.solid_nights.status == "warn":
-        out.append(Alert("warn", f"Solid nights {week.solid_nights.value:.0f} / {week.solid_nights.target}"
+    if week.solid_nights.status in ("warn", "act"):
+        out.append(Alert(week.solid_nights.status, f"Solid nights {week.solid_nights.value:.0f} / {week.solid_nights.target}"
                                  + ("" if week.complete else " — target out of reach this week"),
                          S.action(cfg, "solid_nights"), "solid_nights"))
     if week.gym.status == "warn":
@@ -898,7 +982,7 @@ def day_alerts(ts: Today, model: Model, cfg: dict, now: datetime) -> list[Alert]
         out.append(Alert(ts.sleep_history.status, f"Sleep history {ts.sleep_history.note.lower()} (Garmin)",
                          S.action(cfg, "sleep_history"), "sleep_history"))
     for n in (model.nights.get(now.date()), model.nights.get(now.date() - timedelta(days=1))):
-        if n and n.hours is not None and n.score is not None and not is_solid(n, cfg):
+        if n and n.hours is not None and n.score is not None and night_level(n, cfg) == "act":
             out.append(Alert("warn", f"Sleep {n.day:%a} was not solid",
                              S.action(cfg, "night"), "night"))
             break

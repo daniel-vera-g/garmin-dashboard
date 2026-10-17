@@ -59,5 +59,22 @@ class Quirks(unittest.TestCase):
         self.assertAlmostEqual(f_to_c(57), 13.9, places=1)
 
 
+class SplitSteps(unittest.TestCase):
+    def test_a_step_holding_two_reps_is_split_by_the_laps(self):
+        from model import split_steps
+        steps = [{"n": 1, "start_gmt": "2030-01-01T10:00:00", "intensity": "WARMUP", "distance_m": 3000},
+                 {"n": 2, "start_gmt": "2030-01-01T10:20:00", "intensity": "ACTIVE", "distance_m": 2450},
+                 {"n": 3, "start_gmt": "2030-01-01T10:30:00", "intensity": "COOLDOWN", "distance_m": 2000}]
+        laps = [{"start_gmt": "2030-01-01T10:00:00", "distance_m": 3000, "avg_speed": 3.3},
+                {"start_gmt": "2030-01-01T10:20:00", "distance_m": 1025, "avg_speed": 4.8},
+                {"start_gmt": "2030-01-01T10:23:35", "distance_m": 405, "avg_speed": 3.3},
+                {"start_gmt": "2030-01-01T10:25:38", "distance_m": 1020, "avg_speed": 4.85},
+                {"start_gmt": "2030-01-01T10:30:00", "distance_m": 2000, "avg_speed": 2.9}]
+        out = split_steps(steps, laps)
+        self.assertEqual([r["intensity"] for r in out], ["WARMUP", "ACTIVE", "RECOVERY", "ACTIVE", "COOLDOWN"])
+        self.assertEqual([r["n"] for r in out], [1, 2, 3, 4, 5])
+        self.assertEqual(split_steps(steps, None), steps)
+
+
 if __name__ == "__main__":
     unittest.main()

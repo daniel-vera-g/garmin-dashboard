@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -55,6 +56,8 @@ DEFAULTS: dict[str, Any] = {
     "alerts": {
         "over_cap": "Ease off inside the rep. Next hard day +48 h",
         "near_cap": "Close to the cap - ease off a little inside the rep",
+        "pace": "Run the reps inside the pace band",
+        "easy_drift": "Easy means easy - keep the HR down",
         "easy": "Easy profile, no pace field",
         "run_share": "Running floor first",
         "bike_hours": "No more riding this week",
@@ -83,18 +86,29 @@ DEFAULTS: dict[str, Any] = {
         "cap_long_bpm": 165,       # reps >= long_rep_m
         "cap_short_bpm": 170,      # shorter reps
         "cap_tolerance_bpm": 0,    # a rep this close above its cap counts as within, flagged amber
+        "cap_tolerance_long_bpm": 0,   # the same for long / short reps only (the larger value wins)
+        "cap_tolerance_short_bpm": 0,
         "long_rep_m": 1200,
         "subt_max_slower_s": 30,   # rep slower than LT pace + this is aerobic, not a rep
         "speed_margin_s": 8,       # session's median rep this much faster than LT = speed session
         "min_rep_m": 100,          # shorter ACTIVE laps are lap-button artefacts
         "min_rep_s": 30,
     },
-    "easy": {"hr_cap_bpm": 140, "max_share_above": 0.10},
+    # max_share_above: this share of the time above the cap or more is red;
+    # share_green > 0 adds an amber zone from share_green up to max_share_above
+    "easy": {"hr_cap_bpm": 140, "max_share_above": 0.10, "share_green": 0.0},
+    "speed": {"pace_tolerance_s": 3},   # s/km outside a [[session]] pace band that is still amber
     "long_run": {"hr_cap_bpm": 140, "min_minutes": 60},
-    "runs": {"run_days_target": 6, "run_days_min": 5, "run_km_tolerance": 0.10,
-             # +/- around the threshold-km band; 0 = a range is judged as written
-             # (a single planned figure then uses run_km_tolerance)
-             "threshold_tolerance": 0.0},
+    # Weekly targets get three levels: inside the tolerance green, inside the amber
+    # zone amber, beyond it red. Amber zones of 0 (not set) keep everything outside
+    # the tolerance amber.
+    "runs": {"run_days_target": 6, "run_days_min": 5,
+             "run_km_tolerance": 0.10,          # green: +/- around the run-km target
+             "run_km_amber_under": 0.0, "run_km_amber_over": 0.0,
+             # green +/- around the threshold-km band; 0 = a range is judged as
+             # written (a single planned figure then uses run_km_tolerance)
+             "threshold_tolerance": 0.0,
+             "threshold_amber_under": 0.0, "threshold_amber_over": 0.0},
     "bike": {
         "max_hours": 3.0,
         "easy_hr_cap_bpm": 125,
@@ -112,6 +126,9 @@ DEFAULTS: dict[str, Any] = {
         "solid_score": 70,
         "solid_hours": 6.5,
         "solid_nights_target": 5,
+        # an amber night: below solid, at least these (0 = not set: below solid is red)
+        "amber_score": 0, "amber_hours": 0.0,
+        "ok_nights_target": 0,      # solid-or-amber nights per week that still read amber
     },
     "readiness": {"hrv_low": 55, "hrv_high": 65},
     "load": {"acwr_low": 0.8, "acwr_high": 1.3},
@@ -128,6 +145,9 @@ DEFAULTS: dict[str, Any] = {
         "hours_after_subt": 24,
         "hours_after_overcap_race_test": 48,
         "max_recovery_hours": 24,
+        # one red night before quality is fine if readiness is at least this level
+        # (e.g. "MODERATE"); "" = any red night closes the hard session
+        "red_night_ok_readiness": "",
     },
     "gym": {"targets": [{"per_week": 2}]},
 }
@@ -184,6 +204,15 @@ def bedtime_target_minutes(cfg: dict[str, Any]) -> int:
     return int(hh) * 60 + int(mm)
 
 
+def pace_band(v: Any) -> tuple[float, float] | None:
+    """'3:35-3:42' (min:sec per km) -> (215.0, 222.0); None if absent or malformed."""
+    m = re.fullmatch(r"\s*(\d+):(\d{2})\s*[-–]\s*(\d+):(\d{2})\s*", str(v or ""))
+    if not m:
+        return None
+    a, b = int(m[1]) * 60 + int(m[2]), int(m[3]) * 60 + int(m[4])
+    return (float(min(a, b)), float(max(a, b)))
+
+
 def _as_date(v: Any) -> date:
     return v if isinstance(v, date) else date.fromisoformat(str(v))
 
@@ -218,6 +247,7 @@ class SessionOverride:
     kind: str | None = None          # one of SESSION_KINDS
     accept: bool = False             # the verdict stands corrected: no red, no alert
     note: str = ""
+    pace: tuple[float, float] | None = None   # planned rep pace band, s/km (fast, slow)
     name: str = ""                   # optional: part of the activity name, when a day has several
 
 
@@ -292,7 +322,7 @@ def load_season(path: Path | None = None) -> Season:
     overrides = [SessionOverride(date=_as_date(o["date"]),
                                  kind=o.get("kind") if o.get("kind") in SESSION_KINDS else None,
                                  accept=bool(o.get("accept", False)), note=str(o.get("note", "")),
-                                 name=str(o.get("name", "")))
+                                 name=str(o.get("name", "")), pace=pace_band(o.get("pace")))
                  for o in raw.get("session", []) if o.get("date")]
     w1 = meta.get("week1_start")
     return Season(week1_start=_as_date(w1) if w1 else None,

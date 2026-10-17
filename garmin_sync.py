@@ -19,6 +19,7 @@ re-pull window had passed. Failed requests leave dates uncovered, so a later
 sync fills the gap; covered dates are not asked for again.
   lactate.json                 LT speed + running power  re-pulled (one call)
   activity/<id>/intervals.json typed interval splits     once, structured runs
+  activity/<id>/laps.json      lap-button laps           once, structured runs (finer than the steps)
   activity/<id>/series.json    HR / speed / power        once, unstructured runs and rides
   activity/<id>/weather.json   station weather (raw °F)  once, outdoor runs
 
@@ -146,6 +147,15 @@ def slim_intervals(ts: dict[str, Any]) -> list[dict[str, Any]]:
              "max_hr": s.get("maxHR"), "avg_speed": s.get("averageSpeed"),
              "intensity": str(s["type"]).removeprefix("INTERVAL_")}
             for i, s in enumerate(rows)]
+
+
+def slim_laps(sp: dict[str, Any]) -> list[dict[str, Any]]:
+    """The watch's own laps. A workout step can cover several of them - e.g. an
+    extra rep run inside one step - so model.py uses them to split such steps."""
+    return [{"n": i + 1, "start_gmt": l.get("startTimeGMT"), "distance_m": l.get("distance"),
+             "duration_s": l.get("duration"), "avg_hr": l.get("averageHR"),
+             "max_hr": l.get("maxHR"), "avg_speed": l.get("averageSpeed")}
+            for i, l in enumerate((sp or {}).get("lapDTOs") or [])]
 
 
 SERIES_KEYS = {"sumDuration": "t", "sumDistance": "d", "directSpeed": "v",
@@ -378,7 +388,7 @@ def sync_lactate(c: Garmin, today: date) -> None:
 
 def sync_activity_detail(c: Garmin, acts: dict[str, dict], today: date) -> None:
     since = (today - timedelta(days=DETAIL_DAYS)).isoformat()
-    got = {"intervals": 0, "series": 0, "weather": 0}
+    got = {"intervals": 0, "laps": 0, "series": 0, "weather": 0}
     for a in acts.values():
         if (a.get("start_local") or "")[:10] < since:
             continue
@@ -388,7 +398,7 @@ def sync_activity_detail(c: Garmin, acts: dict[str, dict], today: date) -> None:
             bool(INTERVAL_TYPES & set(a.get("intervals", [])))
         want = []
         if t in RUN_TYPES:
-            want.append("intervals" if structured else "series")
+            want += ["intervals", "laps"] if structured else ["series"]
             if t not in INDOOR_RUN_TYPES:
                 want.append("weather")
         elif t in BIKE_TYPES:
@@ -402,6 +412,11 @@ def sync_activity_detail(c: Garmin, acts: dict[str, dict], today: date) -> None:
                 if raw is None:
                     continue
                 obj = slim_intervals(raw)
+            elif kind == "laps":
+                raw = fetch("laps", c.get_activity_splits, aid)
+                if raw is None:
+                    continue
+                obj = slim_laps(raw)
             elif kind == "series":
                 raw = fetch("series", c.get_activity_details, aid)
                 if raw is None:
@@ -414,7 +429,8 @@ def sync_activity_detail(c: Garmin, acts: dict[str, dict], today: date) -> None:
                 obj = slim_weather(raw)
             write_json(p, obj)
             got[kind] += 1
-    print(f"  per-activity     intervals {got['intervals']}, series {got['series']}, weather {got['weather']}")
+    print(f"  per-activity     intervals {got['intervals']}, laps {got['laps']}, series {got['series']}, "
+          f"weather {got['weather']}")
 
 
 def main() -> int:

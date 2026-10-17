@@ -39,6 +39,36 @@ def num(v: Any, allow_zero: bool = False) -> float | None:
     return f
 
 
+REP_PACE_SPREAD = 1.15      # a lap this much slower than the step's fastest is a recovery
+
+
+def split_steps(steps: list[dict] | None, laps: list[dict] | None) -> list[dict] | None:
+    """Workout steps (typed splits) refined by the watch's laps.
+
+    A step normally is one lap. When a run doesn't follow the programmed
+    workout - an extra rep, the lap button pressed inside a step - one ACTIVE
+    step covers several laps: reps and the jogs between them. Those laps are
+    taken instead, the ones near the step's fastest pace as reps and the
+    slower ones as recoveries."""
+    if not steps or not laps:
+        return steps
+    starts = [_dt(s.get("start_gmt")) for s in steps]
+    lap_starts = [(_dt(l.get("start_gmt")), l) for l in laps]
+    out: list[dict] = []
+    for i, step in enumerate(steps):
+        lo, hi = starts[i], starts[i + 1] if i + 1 < len(steps) else None
+        inside = [l for t, l in lap_starts if lo and t and lo <= t and (hi is None or t < hi)]
+        if step.get("intensity") != "ACTIVE" or len(inside) < 2:
+            out.append(step)
+            continue
+        speeds = [num(l.get("avg_speed")) for l in inside]
+        fastest = max((v for v in speeds if v), default=None)
+        for l, v in zip(inside, speeds):
+            rep = bool(fastest and v and fastest / v <= REP_PACE_SPREAD)
+            out.append({**l, "intensity": "ACTIVE" if rep else "RECOVERY"})
+    return [{**row, "n": i + 1} for i, row in enumerate(out)]
+
+
 def _dt(s: Any) -> datetime | None:
     if not s:
         return None
@@ -249,7 +279,7 @@ def load_model(cache: Path) -> Model:
             max_hr=num(a.get("max_hr")), elev_gain_m=num(a.get("elev_gain_m"), allow_zero=True),
             avg_power=num(a.get("avg_power")), intervals=list(a.get("intervals") or []))
         folder = cache / "activity" / act.id
-        laps = _read(folder / "intervals.json", None)
+        laps = split_steps(_read(folder / "intervals.json", None), _read(folder / "laps.json", None))
         if laps:
             act.laps = [Lap(n=l.get("n") or i + 1, distance_m=num(l.get("distance_m")),
                             duration_s=num(l.get("duration_s")), avg_hr=num(l.get("avg_hr")),

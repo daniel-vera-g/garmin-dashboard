@@ -87,7 +87,7 @@ class Sessions(unittest.TestCase):
         kinds = {s.act.id: s.kind for s in ss}
         self.assertEqual(kinds[longer.id], "long")
         self.assertEqual(kinds[short.id], "easy")
-        self.assertEqual(next(s for s in ss if s.kind == "long").status, "warn")
+        self.assertEqual(next(s for s in ss if s.kind == "long").status, "act")      # over its cap is red
 
     def test_no_long_run_under_an_hour(self):
         a = act(minutes=50)
@@ -516,7 +516,7 @@ class TolerancesAndOverrides(unittest.TestCase):
         self.assertEqual(s2.status, "warn")
         wk = M.week_summary(MON, model(q2), c, season(), SUN_NIGHT)
         alerts = M.alerts(wk, model(q2), c, SUN_NIGHT)
-        self.assertTrue(any(a.key == "near_cap" and "+3 allowed" in a.what for a in alerts))
+        self.assertTrue(any(a.key == "near_cap" and "inside the tolerance" in a.what for a in alerts))
         self.assertFalse(any(a.key == "over_cap" for a in alerts))
 
     def test_threshold_tolerance_widens_a_range(self):
@@ -549,6 +549,78 @@ class TolerancesAndOverrides(unittest.TestCase):
         m = model(q, nights=[night(today), night(today - timedelta(days=1))], readiness=readiness(today))
         hs = M.hard_session(m, cfg(), sea, datetime.combine(today, time(9)))
         self.assertEqual(hs.opens, q.end + timedelta(hours=48))
+
+
+class ThreeLevelBands(unittest.TestCase):
+    """v1.2.0: green / amber / red around caps, weekly targets, easy runs, sleep."""
+
+    def test_band_verdict_levels(self):
+        bv = lambda v, done=True: M.band_verdict(v, 50, 50, 0.05, 0.15, 0.10, done)
+        self.assertEqual([bv(50), bv(48), bv(44), bv(42), bv(54), bv(56)],
+                         ["good", "good", "warn", "act", "warn", "act"])
+        self.assertEqual(bv(42, done=False), "neutral")              # shortfall waits for the week end
+        self.assertEqual(M.band_verdict(4.8, 6.4, 6.4, 0.1, 0.25, 0.15, True), "warn")   # on the edge
+        self.assertEqual(M.band_verdict(1.0, 0, 0, 0.1, 0.25, 0.15, False), "act")      # no sub-T planned
+        self.assertEqual(M.band_verdict(42, 50, 50, 0.1, 0, 0, True), "warn")           # no zone: as before
+
+    def test_cap_tolerance_by_rep_length(self):
+        long_ = subt_session(1, [166, 167, 168])                      # cap 165, long reps
+        c = cfg(threshold={"cap_tolerance_long_bpm": 2, "cap_tolerance_short_bpm": 0})
+        s = M.classify([long_], model(long_), c, season())[0]
+        self.assertEqual([(r.within, r.near) for r in s.reps], [(True, True), (True, True), (False, False)])
+        self.assertAlmostEqual((s.within_km, s.over_km), (3.2, 1.6))
+        short = subt_session(1, [171], rep_m=1000)                    # cap 170, short reps: no leeway
+        self.assertFalse(M.classify([short], model(short), c, season())[0].reps[0].within)
+
+    def test_speed_reps_judged_on_the_pace_band(self):
+        q = subt_session(3, [176, 180], rep_m=1000, rep_pace=215)     # 3:35/km
+        q2 = subt_session(3, [176], rep_m=1000, rep_pace=208)         # 3:28/km: 7 s too fast
+        for act_, want in ((q, "good"), (q2, "act")):
+            sea = season(sessions=[S.SessionOverride(act_.day, kind="speed", pace=(215.0, 222.0))])
+            s = M.classify([act_], model(act_), cfg(), sea)[0]
+            self.assertEqual(s.status, want)
+        wk = M.week_summary(MON, model(q2), cfg(), season(sessions=[
+            S.SessionOverride(q2.day, kind="speed", pace=(215.0, 222.0))]), SUN_NIGHT)
+        self.assertTrue(any(a.key == "pace" and "3:28" in a.what for a in M.week_alerts(wk, cfg())))
+
+    def test_easy_run_amber_zone(self):
+        ser = series((45, 130, 3.0, None), (5, 150, 3.0, None))       # 10 % above the cap
+        ser7 = series((47, 130, 3.0, None), (3, 150, 3.0, None))      # 6 %
+        c = cfg(easy={"share_green": 0.05, "max_share_above": 0.10})  # 50 min: easy, not the long run
+        self.assertEqual(M.classify([act(minutes=50, avg_hr=133, ser=ser)], model(), c, season())[0].status, "act")
+        run = act(minutes=50, avg_hr=132, ser=ser7)
+        self.assertEqual(M.classify([run], model(run), c, season())[0].status, "warn")
+        wk = M.week_summary(MON, model(run), c, season(), SUN_NIGHT)
+        self.assertEqual(wk.easy.status, "warn")
+        self.assertTrue(any(a.key == "easy" and a.level == "warn" for a in M.week_alerts(wk, c)))
+
+    def test_amber_nights_and_the_pre_quality_gate(self):
+        c = cfg(sleep={"solid_score": 75, "solid_hours": 7.0, "amber_score": 70, "amber_hours": 6.5},
+                hard_session={"red_night_ok_readiness": "MODERATE"})
+        self.assertEqual([M.night_level(night(MON, hours=7.5, score=80), c),
+                          M.night_level(night(MON, hours=6.8, score=72), c),
+                          M.night_level(night(MON, hours=6.0, score=80), c)], ["good", "warn", "act"])
+        today = MON + timedelta(days=3)
+        now = datetime.combine(today, time(9))
+        gate = lambda nights, level: next(
+            ch for ch in M.hard_session(model(nights=nights, readiness=readiness(today, level=level)),
+                                        c, season(), now).checks if ch.label == "Two solid nights")
+        amber = [night(today, hours=6.8, score=72), night(today - timedelta(days=1), hours=6.8, score=72)]
+        self.assertEqual(gate(amber, "HIGH").state, "ok")
+        one_red = [night(today, hours=5, score=50), night(today - timedelta(days=1))]
+        self.assertEqual(gate(one_red, "MODERATE").state, "ok")
+        self.assertEqual(gate(one_red, "LOW").state, "fail")
+        two_red = [night(today, hours=5, score=50), night(today - timedelta(days=1), hours=5, score=50)]
+        self.assertEqual(gate(two_red, "HIGH").state, "fail")
+
+    def test_solid_nights_week_reads_amber_on_solid_or_amber_nights(self):
+        c = cfg(sleep={"solid_score": 75, "solid_hours": 7.0, "amber_score": 70, "amber_hours": 6.5,
+                       "solid_nights_target": 4, "ok_nights_target": 5})
+        nights = ([night(MON + timedelta(days=i), hours=7.5, score=80) for i in range(3)]
+                  + [night(MON + timedelta(days=i), hours=6.8, score=72) for i in range(3, 5)]
+                  + [night(MON + timedelta(days=i), hours=5, score=50) for i in range(5, 7)])
+        wk = M.week_summary(MON, model(nights=nights), c, season(), SUN_NIGHT)
+        self.assertEqual((wk.solid_nights.value, wk.solid_nights.status), (3, "warn"))
 
 
 class ConfigNotTracked(unittest.TestCase):

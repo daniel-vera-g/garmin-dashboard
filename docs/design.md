@@ -90,3 +90,16 @@ targets, dates) are never part of a decision here - they live in the config.
 | Alerts can be marked viewed, per browser, keyed by their text | Owner | Acknowledge without hiding a new problem |
 | Semantic-versioned releases with a changelog; version in the header | Owner | Track what changed and check features |
 
+## Three-level bands (v1.2.0)
+
+| Decision | By | Why |
+|---|---|---|
+| Green / amber / red around caps, weekly targets, easy runs and sleep; amber counts as executed, red doesn't | Owner (coach's model) | Close misses aren't failures |
+| A session's colour is its worst rep; threshold km counts green and amber reps, over-cap km only red ones | Coach | |
+| Amber zones default to "not set", which keeps the old behaviour (outside green = amber) | Default | Existing configs keep working |
+| Speed sessions with a planned pace band are judged on pace, not HR | Coach | Track reps are pace work |
+| A long run over its cap is red | Coach | |
+| Pre-quality gate: both nights at least amber pass; one red night passes at readiness ≥ a configured level | Coach | |
+| Structured runs also fetch the watch's laps; an ACTIVE step holding several laps is split into reps and recoveries by pace | Default | An extra rep inside one workout step merged two reps and the jog |
+| The coach prompt lists every session of the last two weeks and the exact key names | Default | The coach thought sessions were missing and invented key names |
+

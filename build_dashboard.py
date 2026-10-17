@@ -293,7 +293,8 @@ def week_card(w: M.Week, cfg: dict, m: Model, ts: M.Today, now: datetime) -> str
             "", w.bike_thr_min.status, sub=w.bike_thr_min.note or f"≥ {bc['threshold_pct']:.0%} FTP")}
     </div>""")
     sleep = group("Sleep", f"""<div class="mgrid one">
-      {cell("Solid nights", f"{w.solid_nights.value:.0f}", f"/ ≥ {sc['solid_nights_target']}", w.solid_nights.status, key="solid_nights",
+      {cell("Solid nights", f"{w.solid_nights.value:.0f}", f"/ ≥ {sc['solid_nights_target']}", w.solid_nights.status,
+            sub=w.solid_nights.note + (f" / {sc['ok_nights_target']}" if sc.get("ok_nights_target") else ""), key="solid_nights",
             progress=(w.solid_nights.value, sc['solid_nights_target']))}
       {cell("Bedtime 7-day", clock_noon(mb), f"/ ≤ {sc['bedtime_target']}",
             ts.bedtime.status, arrow(mb, ts.bedtime.prev), key="bedtime")}
@@ -352,7 +353,11 @@ def session_detail(s: M.Session, cfg: dict) -> tuple[str, str]:
                 hr = f'<span class="{cls}">{r.avg_hr:.0f}</span> <span class="dim">/ {r.cap}</span>' if r.avg_hr else DASH
             else:
                 hr = f'<span class="dim">{r.avg_hr:.0f} · {r.kind}</span>' if r.avg_hr else r.kind
-            rows.append(f"<tr><td>{i}</td><td class=num>{r.distance_m:.0f} m</td><td class=num>{mmss(r.pace)}</td>"
+            pace_cls = {"good": "t-good", "warn": "t-warn", "act": "t-act"}.get(r.pace_verdict or "", "")
+            if r.kind == "subt":
+                pace_cls = ""
+            rows.append(f"<tr><td>{i}</td><td class=num>{r.distance_m:.0f} m</td>"
+                        f"<td class=num><span class=\"{pace_cls}\">{mmss(r.pace)}</span></td>"
                         f"<td class=num>{hr}</td></tr>")
         bits.append(f'<table class="reps"><tr><th>Rep</th><th class=num>Dist</th><th class=num>Pace /km</th>'
                     f'<th class=num>HR / cap</th></tr>{"".join(rows)}</table>')

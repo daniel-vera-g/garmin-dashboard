@@ -34,6 +34,8 @@ consistency_warn_min = 75   # under this -> amber, above -> red
 cap_long_bpm = 165          # HR cap for reps >= long_rep_m
 cap_short_bpm = 170         # HR cap for shorter reps
 cap_tolerance_bpm = 0       # reps up to this far over their cap count as within (shown amber)
+cap_tolerance_long_bpm = 0  # the same, long reps only (the larger of the two values wins)
+cap_tolerance_short_bpm = 0 # the same, short reps only
 long_rep_m = 1200
 subt_max_slower_s = 30      # reps slower than LT pace + this are aerobic, not reps
 speed_margin_s = 8          # median rep this much faster than LT pace = speed session
@@ -42,7 +44,8 @@ min_rep_s = 30
 
 [easy]
 hr_cap_bpm = 140            # easy runs: average HR at or below
-max_share_above = 0.10      # and under 10 % of the time above it
+max_share_above = 0.10      # and under 10 % of the time above it (from here: red)
+share_green = 0.0           # > 0: from this share up to max_share_above is amber
 
 [long_run]
 hr_cap_bpm = 140
@@ -51,8 +54,14 @@ min_minutes = 60            # the week's longest unstructured run counts as the 
 [runs]
 run_days_target = 6
 run_days_min = 5
-run_km_tolerance = 0.10     # +/- 10 % around the weekly target
-threshold_tolerance = 0.0   # +/- around the threshold-km band; 0 = judged as written
+# Weekly targets: inside +/- *_tolerance green; down to -*_amber_under and up to
+# +*_amber_over amber; beyond that red. Amber 0 = not set: outside green is amber.
+run_km_tolerance = 0.10     # green +/- around the weekly run-km target
+run_km_amber_under = 0.0
+run_km_amber_over = 0.0
+threshold_tolerance = 0.0   # green +/- around the threshold-km band; 0 = judged as written
+threshold_amber_under = 0.0
+threshold_amber_over = 0.0
 
 [bike]
 max_hours = 3.0
@@ -71,6 +80,9 @@ bedtime_target = "23:00"
 solid_score = 70
 solid_hours = 6.5
 solid_nights_target = 5
+amber_score = 0             # an amber night: at least this score and amber_hours (0 = not set)
+amber_hours = 0.0
+ok_nights_target = 0        # solid-or-amber nights per week that still read amber (0 = not set)
 
 [readiness]
 hrv_low = 55
@@ -89,7 +101,11 @@ max_elev_m_per_km = 5.0     # "flat"
 min_minutes_in_band = 5.0
 hours_after_quality = 24     # runs this soon after a quality session are excluded
 
+[speed]
+pace_tolerance_s = 3        # s/km outside a [[session]] pace band that is still amber
+
 [hard_session]
+red_night_ok_readiness = "" # e.g. "MODERATE": one red night before quality is fine at that readiness
 hours_after_subt = 24
 hours_after_overcap_race_test = 48
 max_recovery_hours = 24
@@ -104,6 +120,8 @@ targets = [ { per_week = 2 } ]
 [alerts]
 over_cap = "Ease off inside the rep. Next hard day +48 h"
 near_cap = "Close to the cap - ease off a little inside the rep"
+pace = "Run the reps inside the pace band"
+easy_drift = "Easy means easy - keep the HR down"
 easy = "Easy profile, no pace field"
 run_share = "Running floor first"
 bike_hours = "No more riding this week"
@@ -172,4 +190,5 @@ threshold = [12, 16]
 [[session]]
 date = 2030-03-20
 kind = "speed"
+pace = "3:35-3:42"          # optional: planned rep pace; speed reps are then judged on pace
 note = "planned change: fast session instead of sub-T"

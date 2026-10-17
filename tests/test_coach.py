@@ -159,5 +159,18 @@ class Coach(unittest.TestCase):
         self.assertIn("watch the left calf", saved)
 
 
+    def test_pace_band_and_readiness_rule_from_an_answer(self):
+        up = coach.parse(answer('[[session]]\ndate = 2030-01-08\npace = "3:35 - 3:42"\n'
+                                '[hard_session]\nred_night_ok_readiness = "moderate"\n'
+                                '[runs]\nrun_km_amber_under = 0.15\n[sleep]\namber_hours = 6.5'))
+        self.assertEqual(up.sessions[0]["pace"], "3:35-3:42")
+        self.assertEqual(up.settings[("hard_session", "red_night_ok_readiness")], "MODERATE")
+        self.assertEqual(up.settings[("sleep", "amber_hours")], 6.5)       # hours, not a fraction
+        bad = coach.parse(answer('[[session]]\ndate = 2030-01-08\npace = "fast"\n[[week]]\nn = 1\nrun_km = 30\n'
+                                 '[hard_session]\nred_night_ok_readiness = "SOMETIMES"'))
+        self.assertTrue(any("pace" in w for w in bad.warnings))
+        self.assertTrue(any("red_night_ok_readiness" in w for w in bad.warnings))
+
+
 if __name__ == "__main__":
     unittest.main()

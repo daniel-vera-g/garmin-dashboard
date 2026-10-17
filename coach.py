@@ -41,27 +41,32 @@ MAX_ANSWER = 64 * 1024
 RECENT_DAYS = 14                                    # sessions shown to the coach
 
 WEEK_KEYS = {"n", "run_km", "threshold", "recovery"}
-SESSION_KEYS = {"date", "kind", "accept", "note", "name"}
+SESSION_KEYS = {"date", "kind", "accept", "note", "name", "pace"}
 RACE_KEYS = {"date", "name", "short", "priority", "sport"}
 # Settings the coach decides. App, sync and display settings are not the coach's.
 COACH_SECTIONS = ("threshold", "easy", "long_run", "runs", "bike", "sleep", "readiness", "load",
-                  "pace_at_hr", "hard_session", "alerts")
+                  "pace_at_hr", "hard_session", "speed", "alerts")
 # Shown to the coach with their current values, to confirm or correct.
 PROMPT_KEYS = [
     ("threshold", "cap_long_bpm"), ("threshold", "cap_short_bpm"), ("threshold", "long_rep_m"),
-    ("threshold", "cap_tolerance_bpm"),
-    ("easy", "hr_cap_bpm"), ("easy", "max_share_above"), ("long_run", "hr_cap_bpm"),
-    ("runs", "run_days_target"), ("runs", "run_days_min"), ("runs", "run_km_tolerance"),
-    ("runs", "threshold_tolerance"),
+    ("threshold", "cap_tolerance_long_bpm"), ("threshold", "cap_tolerance_short_bpm"),
+    ("easy", "hr_cap_bpm"), ("easy", "share_green"), ("easy", "max_share_above"),
+    ("long_run", "hr_cap_bpm"),
+    ("runs", "run_days_target"), ("runs", "run_days_min"),
+    ("runs", "run_km_tolerance"), ("runs", "run_km_amber_under"), ("runs", "run_km_amber_over"),
+    ("runs", "threshold_tolerance"), ("runs", "threshold_amber_under"), ("runs", "threshold_amber_over"),
+    ("speed", "pace_tolerance_s"),
     ("bike", "max_hours"), ("bike", "easy_hr_cap_bpm"), ("bike", "max_km"), ("bike", "ftp_w"),
     ("bike", "min_run_share"),
     ("sleep", "bedtime_target"), ("sleep", "solid_score"), ("sleep", "solid_hours"),
-    ("sleep", "solid_nights_target"),
+    ("sleep", "solid_nights_target"), ("sleep", "amber_score"), ("sleep", "amber_hours"),
+    ("sleep", "ok_nights_target"),
     ("readiness", "hrv_low"), ("readiness", "hrv_high"),
     ("load", "acwr_low"), ("load", "acwr_high"),
     ("hard_session", "hours_after_subt"), ("hard_session", "hours_after_overcap_race_test"),
-    ("hard_session", "max_recovery_hours"),
+    ("hard_session", "max_recovery_hours"), ("hard_session", "red_night_ok_readiness"),
 ]
+FRACTION_KEYS = ("tolerance", "_under", "_over", "share_green", "share_above", "min_run_share", "threshold_pct")
 
 
 def monday(d: date) -> date:
@@ -129,8 +134,9 @@ def _fmt_value(v: Any) -> str:
 
 
 def recent_sessions(model: Any, cfg: dict, season: S.Season, today: date) -> list[str]:
-    """The dashboard's reading of the last two weeks' quality and flagged sessions,
-    one line each, so the coach can confirm it or say what was planned."""
+    """The dashboard's reading of every session of the last two weeks, one line
+    each, so the coach can confirm it or say what was planned - and sees that no
+    session is missing."""
     import metrics as M                     # heavy import only when there is a model
     lines = []
     start = today - timedelta(days=RECENT_DAYS)
@@ -138,10 +144,11 @@ def recent_sessions(model: Any, cfg: dict, season: S.Season, today: date) -> lis
         for s in M.classify(model.in_range(wk, wk + timedelta(days=7)), model, cfg, season):
             if not start <= s.act.day <= today:
                 continue
-            if s.kind not in ("subt", "speed", "race", "test", "long") and s.status not in ("act", "warn"):
-                continue
-            bits = [f"{s.act.day:%a %d %b}", s.title]
+            bits = [f"{s.act.day:%a %d %b}", s.title, f"{s.act.hours * 60:.0f} min"]
             sub = [r for r in s.reps if r.kind == "subt"]
+            spd = [r for r in s.reps if r.kind == "speed"]
+            if spd:
+                bits.append("rep paces " + "·".join(M._mmss(r.pace) for r in spd))
             if sub:
                 caps = "/".join(str(c) for c in sorted({r.cap for r in sub}))
                 bits.append("reps " + "·".join(f"{r.avg_hr:.0f}" for r in sub if r.avg_hr) + f" vs cap {caps}")
@@ -150,7 +157,7 @@ def recent_sessions(model: Any, cfg: dict, season: S.Season, today: date) -> lis
             if s.kind == "easy" and s.hr_above:
                 bits.append(f"{s.hr_above[0] / s.hr_above[1]:.0%} of the time above {cfg['easy']['hr_cap_bpm']}")
             bits += s.flags                                   # rides: which discipline rule
-            verdict = {"act": "OVER CAP / FAILED", "warn": "DRIFTING", "good": "OK", "none": "NO HR"}.get(s.status, "")
+            verdict = {"act": "RED", "warn": "AMBER", "good": "OK", "none": "NO HR"}.get(s.status, "")
             if s.accepted:
                 verdict = "ACCEPTED BY YOU"
             if verdict:
@@ -185,13 +192,13 @@ A. WEEKLY TARGETS, Wk{first}–Wk{last} (and any later week that changed)
 {rows}
 Threshold km = sub-threshold rep distance only, at or under my HR cap. Give it as [low, high], as [n, n] for a single planned figure, or [0, 0] for a week without sub-T.
 
-B. RECENT SESSIONS - the dashboard's reading of the last two weeks
+B. RECENT SESSIONS - every session of the last two weeks, with the dashboard's verdict
 {sess_txt}
-If a session was a planned change (e.g. a fast session instead of sub-T), or its verdict is fine as it is, say so with a [[session]] entry: date, kind = "speed" / "subt" / "race" / "test" to reclassify it, and/or accept = true to accept the verdict, plus a short note. Leave out sessions that are read correctly.
+If a session was a planned change (e.g. a fast session instead of sub-T), or its verdict is fine as it is, say so with a [[session]] entry: date, kind = "speed" / "subt" / "race" / "test" to reclassify it, accept = true to accept the verdict, pace = "m:ss-m:ss" for the planned rep pace band of a speed session (its reps are then judged on pace), plus a short note. Leave out sessions that are read correctly.
 
-C. RULES, CAPS AND TOLERANCES - current values
+C. RULES, CAPS AND TOLERANCES - current values (use exactly these key names)
 {rules}
-Correct any that are wrong, and give the tolerances: how many bpm over a rep cap are still fine (threshold.cap_tolerance_bpm), and how far under or over the weekly run-km and threshold-km targets is still fine, as a fraction, e.g. 0.1 = ±10 % (runs.run_km_tolerance, runs.threshold_tolerance). bike.ftp_w is my own test result only, never Garmin's estimate.
+Correct any that are wrong. How the bands work: a rep up to cap + cap_tolerance_*_bpm is amber and still counts as threshold km, above it red. Weekly targets: within ± *_tolerance green, down to -*_amber_under / up to +*_amber_over amber, beyond red (fractions, 0.1 = 10 %; amber 0 = not set). easy: time above the cap from share_green amber, from max_share_above red. sleep: solid = solid_score + solid_hours; amber night = amber_score + amber_hours; solid_nights_target solid nights = green, ok_nights_target solid-or-amber nights = amber. hard_session.red_night_ok_readiness: one red night before quality is fine at this readiness or better ("" = never). bike.ftp_w is my own test result only, never Garmin's estimate. Anything the keys can't express: describe it under NOTES.
 
 D. RACES still ahead
 {races}
@@ -214,11 +221,13 @@ accept = true
 note = "planned change: fast session"
 
 [threshold]
-cap_tolerance_bpm = 2
+cap_tolerance_long_bpm = 2
+cap_tolerance_short_bpm = 0
 
 [runs]
-run_km_tolerance = 0.1
-threshold_tolerance = 0.1
+run_km_tolerance = 0.05
+run_km_amber_under = 0.15
+run_km_amber_over = 0.10
 
 [bike]
 ftp_w = 250
@@ -277,6 +286,9 @@ def _setting(sec: str, key: str, v: Any) -> tuple[Any, str | None]:
     if key not in S.DEFAULTS.get(sec, {}):
         return None, f"[{sec}]: ignored unknown key '{key}'"
     default = S.DEFAULTS[sec][key]
+    if (sec, key) == ("hard_session", "red_night_ok_readiness"):
+        ok = v == "" or (isinstance(v, str) and v.upper() in ("LOW", "MODERATE", "HIGH", "PRIME"))
+        return (v.upper(), None) if ok else (None, f"{sec}.{key} must be \"\", LOW, MODERATE, HIGH or PRIME")
     if isinstance(default, str):
         if not isinstance(v, str) or not 0 < len(v) <= 160:
             return None, f"{sec}.{key} must be text (up to 160 characters)"
@@ -285,7 +297,7 @@ def _setting(sec: str, key: str, v: Any) -> tuple[Any, str | None]:
         return v, None
     if isinstance(default, bool) or not isinstance(default, (int, float)):
         return None, f"{sec}.{key} can't be set from an answer"
-    hi = 1.0 if isinstance(default, float) and default <= 1.0 and ("share" in key or "tolerance" in key) else 10000
+    hi = 1.0 if any(k in key for k in FRACTION_KEYS) and not key.endswith("_bpm") and not key.endswith("_s") else 10000
     n = _number(v, 0, hi)
     if n is None:
         return None, f"{sec}.{key} {v!r} is not a number between 0 and {hi:g}"
@@ -365,13 +377,19 @@ def parse(text: str) -> Update:
                 row["accept"] = o["accept"]
             else:
                 up.warnings.append(f"session {d}: accept must be true or false")
+        if "pace" in o:
+            band = S.pace_band(o["pace"])
+            if band:
+                row["pace"] = f"{int(band[0]) // 60}:{int(band[0]) % 60:02d}-{int(band[1]) // 60}:{int(band[1]) % 60:02d}"
+            else:
+                up.warnings.append(f"session {d}: pace {o['pace']!r} is not \"m:ss-m:ss\"")
         for key in ("note", "name"):
             if key in o:
                 if isinstance(o[key], str) and len(o[key]) <= 200:
                     row[key] = o[key]
                 else:
                     up.warnings.append(f"session {d}: {key} must be text up to 200 characters")
-        if "kind" in row or "accept" in row:
+        if "kind" in row or "accept" in row or "pace" in row:
             up.sessions.append(row)
         else:
             up.warnings.append(f"session {d}: needs kind and/or accept to change anything")

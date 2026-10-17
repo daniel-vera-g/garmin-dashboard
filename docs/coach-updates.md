@@ -11,7 +11,7 @@ showing the dashboard's current values so the coach can confirm or correct them:
 | Prompt section | Answer as | Updates |
 |---|---|---|
 | A. Weekly targets, this week + `[coach] ahead_weeks` | `[[week]]` n, run_km, threshold, recovery | the weekly cells, hero, trends |
-| B. Recent sessions (14 days) with the dashboard's verdict and the reason | `[[session]]` date, kind and/or accept, note | reclassify a planned change, accept a verdict |
+| B. Every session of the last 14 days with the dashboard's verdict and the reason | `[[session]]` date, kind, accept, pace band, note | reclassify a planned change, accept a verdict, judge speed reps on pace |
 | C. Rules, caps and tolerances with current values | `[threshold]`, `[easy]`, `[runs]`, `[bike]` … keys | any coach-set setting, incl. `ftp_w` and `[alerts]` texts |
 | D. Races ahead | `[[race]]` date, name, short, priority, sport | season page, race detection |
 | E. Everything else | NOTES after the block | shown before applying, archived |
@@ -43,8 +43,8 @@ targets are not taken from an answer; edit them in the config.
   connection.
 - Parsing is strict: exactly one TOML block (or the whole text if none is fenced).
   `[[week]]`: `n` 1–104, `run_km` 0–250, `threshold` [lo, hi] with 0 ≤ lo ≤ hi ≤ 60,
-  `recovery` true/false. `[[session]]`: a date, `kind` from a fixed list and/or
-  `accept`, text up to 200 characters. `[[race]]`: date and name, priority A/B/C,
+  `recovery` true/false. `[[session]]`: a date, `kind` from a fixed list, `accept`,
+  `pace` as "m:ss-m:ss", text up to 200 characters. `[[race]]`: date and name, priority A/B/C,
   sport run/bike. Settings: only keys that exist in `settings.DEFAULTS` for a
   coach-set section, with the default's type (numbers ≥ 0; shares and tolerances ≤ 1;
   bedtime as HH:MM; texts up to 160 characters); `ftp_w` 50–600 W.
