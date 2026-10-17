@@ -893,8 +893,10 @@ JS = """
     if(t)show(t.getAttribute('data-tip'),e.clientX,e.clientY);else tip.style.opacity='0';});
 })();
 (function(){
+  var readOnly=document.body.getAttribute('data-read-only')==='1';
   var dlg=document.getElementById('coachdlg'),btn=document.getElementById('coachbtn');
   if(!dlg||!btn)return;
+  if(readOnly){btn.hidden=true;return;}
   var data=JSON.parse(document.getElementById('coachdata').textContent);
   var served=location.protocol==='http:'||location.protocol==='https:';
   var ans=document.getElementById('coachans'),out=document.getElementById('coachout'),
@@ -980,7 +982,9 @@ document.querySelectorAll('.scrollx.end').forEach(function(e){e.scrollLeft=e.scr
 (function(){
   if(location.protocol!=='http:'&&location.protocol!=='https:')return;
   var AUTO=parseFloat(document.body.getAttribute('data-auto-sync')||'0');
+  var readOnly=document.body.getAttribute('data-read-only')==='1';
   var btn=document.getElementById('syncbtn'),at=document.getElementById('syncedat');
+  if(readOnly){btn.hidden=true;at.textContent=at.textContent+' \u00b7 hosted read-only';return;}
   btn.hidden=false;
   function busy(on){btn.disabled=on;btn.innerHTML=on?'<span class="spin"></span>Syncing\\u2026':'Sync';}
   function fail(m){busy(false);at.className='t-act';at.textContent='Sync failed: '+m;}
@@ -1033,6 +1037,7 @@ def coach_dialog(nd: coach.Needs, prompt_text: str) -> tuple[str, str]:
 
 
 def shell(title: str, active: str, header: str, updated: str, body: str, auto_sync: float,
+          hosted_read_only: bool,
           coach_ui: tuple[str, str] = ("", "")) -> str:
     nav = "".join(f'<a href="{href}" class="{"on" if key == active else ""}">{name}</a>'
                   for key, name, href in NAV)
@@ -1040,7 +1045,7 @@ def shell(title: str, active: str, header: str, updated: str, body: str, auto_sy
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)}</title><style>{CSS}</style></head>
-<body data-auto-sync="{auto_sync:g}"><div class="wrap">
+<body data-auto-sync="{auto_sync:g}" data-read-only="{1 if hosted_read_only else 0}"><div class="wrap">
 <header class="top"><div class="hl">{header}</div><nav>{nav}</nav>
 <div class="syncbox"><span class="dim ver" title="Dashboard version - see CHANGELOG.md">v{version()}</span>
 <span id="syncedat" class="dim">updated {updated}</span>
@@ -1071,6 +1076,7 @@ def build(cache: Path, out: Path, config: Path | None = None,
     season = S.load_season(config)
     m = load_model(cache)
     auto = float(cfg["app"]["auto_sync_hours"])
+    hosted_read_only = bool(cfg["app"].get("hosted_read_only", False))
     if m.synced_at:
         updated = f"{m.synced_at:%H:%M}" if m.synced_at.date() == now.date() else f"{m.synced_at:%d %b %H:%M}"
     else:
@@ -1079,9 +1085,12 @@ def build(cache: Path, out: Path, config: Path | None = None,
     cu = coach_dialog(coach.needs(season, cfg, now.date(), cfg["coach"]["ahead_weeks"]),
                       coach.prompt(season, cfg, now.date(), m))
     pages = {
-        "dashboard.html": shell("Training", "home", head, updated, home(m, cfg, season, now), auto, cu),
-        "season.html": shell("Season", "season", head, updated, season_page(m, cfg, season, now), auto, cu),
-        "health.html": shell("Health", "health", head, updated, health_page(m, cfg, now), auto, cu),
+        "dashboard.html": shell("Training", "home", head, updated, home(m, cfg, season, now), auto,
+                                hosted_read_only, cu),
+        "season.html": shell("Season", "season", head, updated, season_page(m, cfg, season, now), auto,
+                             hosted_read_only, cu),
+        "health.html": shell("Health", "health", head, updated, health_page(m, cfg, now), auto,
+                             hosted_read_only, cu),
     }
     out.mkdir(parents=True, exist_ok=True)
     written = []

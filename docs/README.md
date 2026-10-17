@@ -6,6 +6,7 @@ Usage is in [../HOWTO.md](../HOWTO.md), setup and the code map in
 | File | What's in it |
 |---|---|
 | [configuration.md](configuration.md) | The one config file: every section and key |
+| [hosting.md](hosting.md) | Publish read-only pages with GitHub Actions + Pages |
 | [design.md](design.md) | Why the dashboard works the way it does: metric definitions, display rules |
 | [coach-updates.md](coach-updates.md) | The Coach popup: what it asks, how answers are merged, safety rules |
 | [reference.md](reference.md) | Garmin endpoints and quirks, verification baselines, dev workflow |
