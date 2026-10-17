@@ -12,6 +12,7 @@ host = "127.0.0.1"          # loopback only (127.0.0.1, localhost, ::1) - the se
 port = 8765
 auto_sync_hours = 6         # sync on page open when the data is older; 0 = never
 carryover_days = 2          # Mon(+Tue): last week's missed targets stay in the alerts
+hosted_read_only = false    # set true for hosted static pages: hides Sync/Coach actions
 
 [sync]
 tokenstore = "~/.garminconnect"

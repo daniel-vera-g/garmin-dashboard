@@ -14,7 +14,7 @@ neutral placeholder, not a recommendation.
 
 | Section | What it controls |
 |---|---|
-| `[app]` | `host`, `port` of the local server; `auto_sync_hours` (0 = never); `carryover_days` (how long last week's missed targets stay in the alerts) |
+| `[app]` | `host`, `port` of the local server; `auto_sync_hours` (0 = never); `carryover_days` (how long last week's missed targets stay in the alerts); `hosted_read_only` (hide Sync/Coach actions in hosted static pages) |
 | `[sync]` | Garmin token folder; how many days of history are kept and re-pulled |
 | `[coach]` | `ahead_weeks`: how far ahead the Coach popup looks for missing targets |
 | `[health]` | Thresholds on the Health page: resting-HR rise, sleep shortfall, bed/wake consistency |

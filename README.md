@@ -53,6 +53,12 @@ texts, and the season plan (week numbering, races, phases, weekly targets).
 gives the overview. Weekly targets and the FTP can also be updated from the
 dashboard's **Coach** popup.
 
+## Access from anywhere (hosted)
+
+You can publish a read-only version of the three pages with GitHub Actions +
+GitHub Pages, then protect it with Cloudflare Access so only you can open it.
+Setup steps: **[docs/hosting.md](docs/hosting.md)**.
+
 ## Data and privacy
 
 - Everything runs on your Mac. The server binds to `127.0.0.1` and serves only the
@@ -99,4 +105,3 @@ Not affiliated with or endorsed by Garmin. Data comes through
 [`garminconnect`](https://github.com/cyberjunky/python-garminconnect), an unofficial
 client for Garmin Connect; use it with your own account and at your own risk. The
 dashboard is a training aid, not medical advice. MIT licensed, see [LICENSE](LICENSE).
-

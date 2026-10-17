@@ -37,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
         "port": 8765,
         "auto_sync_hours": 6,       # sync on page open when the data is older; 0 = never
         "carryover_days": 2,        # Mon(+Tue): last week's missed targets stay in the alerts
+        "hosted_read_only": False,  # hide Sync/Coach actions in hosted static deployments
     },
     "sync": {
         "tokenstore": "~/.garminconnect",
