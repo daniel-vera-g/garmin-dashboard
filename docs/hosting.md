@@ -3,7 +3,7 @@
 Optional. The dashboard runs locally; this adds a copy you can open from any device
 while the Mac is off, behind a login. A scheduled GitHub Actions job syncs Garmin,
 builds the pages and deploys them to Cloudflare Pages; Cloudflare Access asks for a
-login (GitHub, or a one-time code by email) before any page is served.
+**GitHub login** before any page is served, and lets in only your account.
 
 **Why not GitHub Pages:** on a public repo GitHub Pages are public to everyone (private
 Pages need GitHub Enterprise), and putting a login only in front of a custom domain
@@ -36,15 +36,24 @@ leaves `<user>.github.io` open. The deployment artifact would also be downloadab
 2. **Cloudflare API token.** My Profile → API Tokens → Create token → template
    *Edit Cloudflare Workers* or a custom token with **Account → Cloudflare Pages → Edit**.
    Note your **Account ID** (Workers & Pages overview).
-3. **Access login.** In the Pages project → Settings → **Enable access policy**. Then
-   Zero Trust → Access → Applications → the project's application → *Public hostname*:
-   **remove the `*` from the subdomain** so the production `<project>.pages.dev` is
-   covered, not only previews. Policy: *Allow*, include your email(s). For GitHub login
-   add GitHub under Zero Trust → Settings → Authentication (email one-time PIN works
-   without setup). A custom domain needs its own Access application. Test in a private
-   window: you must see the Cloudflare login, not the dashboard.
-   (Cloudflare docs: Pages → Platform → Known issues → "Enable Access on your
-   `*.pages.dev` domain".)
+3. **GitHub login (Cloudflare Access).** The only way in is your GitHub account.
+   - Cloudflare Zero Trust → Settings: note your **team name** (`<team>.cloudflareaccess.com`).
+   - GitHub → Settings → Developer settings → OAuth Apps → **New OAuth app**:
+     homepage `https://<team>.cloudflareaccess.com`, callback
+     `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`. Copy the Client ID,
+     generate a client secret.
+   - Zero Trust → Integrations → Identity providers → **Add → GitHub**: paste the
+     Client ID (App ID) and secret, save, authorize, **Test**.
+   - Pages project → Settings → **Enable access policy**. Then Zero Trust → Access →
+     Applications → that application:
+     - *Public hostname*: **remove the `*`** from the subdomain, so the production
+       `<project>.pages.dev` is covered, not only previews;
+     - *Login methods*: **GitHub only** (switch off One-time PIN), and turn on
+       *Instant Auth* to skip the chooser;
+     - *Policy*: Allow, Include → **Emails** → the primary email of your GitHub account.
+   - Test in a private window: you must land on GitHub's login, not the dashboard.
+   (Cloudflare docs: Pages → Known issues → "Enable Access on your `*.pages.dev`
+   domain"; Zero Trust → Identity providers → GitHub.)
 4. **GitHub secrets and variables** (repo → Settings → Secrets and variables → Actions):
    - secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`;
    - variables `CF_PAGES_PROJECT` (the project name) and `HOSTED_ENABLED` = `true`;
