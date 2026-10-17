@@ -103,3 +103,12 @@ targets, dates) are never part of a decision here - they live in the config.
 | Structured runs also fetch the watch's laps; an ACTIVE step holding several laps is split into reps and recoveries by pace | Default | An extra rep inside one workout step merged two reps and the jog |
 | The coach prompt lists every session of the last two weeks and the exact key names | Default | The coach thought sessions were missing and invented key names |
 
+## Hosted copy (v1.3.0)
+
+| Decision | By | Why |
+|---|---|---|
+| Hosted copy on Cloudflare Pages behind Cloudflare Access, not GitHub Pages | Owner request, design by default | Reachable with the Mac off, behind a login; GitHub Pages on a public repo is public |
+| Hosted pages are built with `--hosted` (no Coach data, no Sync), a build flag, not a config key | Default | The Coach data is the most personal part; a config key would also switch the local page |
+| Garmin cache between runs encrypted in the Actions cache | Default | ~9 calls per run instead of ~250; caches are readable by PR workflows |
+| Off by default (`HOSTED_ENABLED`) | Default | The public repo must not try to deploy for others |
+

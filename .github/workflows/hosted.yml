@@ -1,0 +1,93 @@
+# Scheduled sync + build, deployed to Cloudflare Pages behind Cloudflare Access.
+# Off unless the repository variable HOSTED_ENABLED is "true" (see docs/hosting.md).
+#
+# Privacy rules for this public repo:
+# - personal config and Garmin tokens come from secrets, never from the repo;
+# - the Garmin cache between runs is stored ENCRYPTED (actions cache is readable by
+#   workflows of pull requests, logs are public);
+# - sync output is not printed - only pass/fail;
+# - pages go straight to Cloudflare (no GitHub Pages, no downloadable artifact) and
+#   are built with --hosted: no Coach data, no Sync.
+name: Hosted dashboard
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 */3 * * *"      # every 3 hours; ~9 Garmin calls per run with a warm cache
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-dashboard
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.HOSTED_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CACHE_KEY: ${{ secrets.CACHE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: pip install -q -r requirements.txt
+
+      - name: Restore encrypted cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state.enc
+          key: hosted-state-${{ github.run_id }}
+          restore-keys: hosted-state-
+
+      - name: Config, tokens and cache
+        env:
+          DASHBOARD_CONFIG_TOML: ${{ secrets.DASHBOARD_CONFIG_TOML }}
+          GARMIN_TOKENSTORE_TGZ_B64: ${{ secrets.GARMIN_TOKENSTORE_TGZ_B64 }}
+        run: |
+          umask 077
+          for v in DASHBOARD_CONFIG_TOML GARMIN_TOKENSTORE_TGZ_B64 CACHE_KEY; do
+            [ -n "${!v}" ] || { echo "missing secret $v"; exit 1; }
+          done
+          mkdir -p private "$HOME/.garminconnect"
+          printf '%s\n' "$DASHBOARD_CONFIG_TOML" > private/config.toml
+          printf '%s' "$GARMIN_TOKENSTORE_TGZ_B64" | base64 --decode | tar -xz -C "$HOME"
+          # the cache also carries the Garmin tokens as last refreshed, so they stay valid
+          if [ -f state.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:CACHE_KEY -in state.enc \
+              | tar -xz -C / || echo "cache unreadable - starting fresh"
+          fi
+
+      - name: Sync (output withheld - public logs)
+        run: python garmin_sync.py > /dev/null 2>&1 || { echo "sync failed"; exit 1; }
+
+      - name: Build hosted pages
+        run: |
+          python build_dashboard.py --hosted --out public > /dev/null
+          printf '/*\n  X-Robots-Tag: noindex, nofollow\n  Cache-Control: no-store\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n' > public/_headers
+          ls public
+
+      - name: Encrypt cache
+        run: |
+          tar -cz -C / "${GITHUB_WORKSPACE#/}/data/cache" "${HOME#/}/.garminconnect" \
+            | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:CACHE_KEY -out state.enc
+
+      - name: Save encrypted cache
+        uses: actions/cache/save@v4
+        with:
+          path: state.enc
+          key: hosted-state-${{ github.run_id }}
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=main

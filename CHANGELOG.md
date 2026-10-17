@@ -5,6 +5,18 @@ All notable changes, newest first. Versions follow [semantic versioning](https:/
 features, **patch** = fixes. The running version is shown in the dashboard header.
 How to release: [docs/releasing.md](docs/releasing.md).
 
+## [1.3.0] - unreleased
+
+### Added
+- **Optional hosted copy** behind a login, refreshed while the Mac is off: scheduled
+  GitHub Actions sync + build, deployed to Cloudflare Pages behind Cloudflare Access
+  (GitHub login or email code). Off unless `HOSTED_ENABLED` is set. The Garmin cache
+  is kept encrypted between runs, logs show only pass/fail, nothing is published on
+  GitHub. See [docs/hosting.md](docs/hosting.md).
+- `build_dashboard.py --hosted`: pages without Sync, without the Coach popup and its
+  data, with `noindex`.
+- `./run.sh hosted-secrets`: uploads config, Garmin tokens and a cache key.
+
 ## [1.2.0] - 2026-10-17
 
 ### Added

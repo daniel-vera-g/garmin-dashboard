@@ -30,6 +30,9 @@ Runs the dashboard as a background service that starts at every login, at
 **http://127.0.0.1:8765**. The first sync backfills 13 weeks (about 250 API calls,
 3-4 minutes); after that a sync takes seconds.
 
+Optional: a read-only **hosted copy** behind a login, refreshed while the Mac is off:
+[docs/hosting.md](docs/hosting.md).
+
 ## Commands
 
 | Command | What it does |
@@ -42,6 +45,7 @@ Runs the dashboard as a background service that starts at every login, at
 | `./run.sh build` | Rebuild from cached data only, no API calls |
 | `./run.sh test` | Run the test suite |
 | `./run.sh login` | Re-authenticate with Garmin |
+| `./run.sh hosted-secrets` | Upload config + Garmin tokens for the hosted copy |
 
 ## Configuration
 
