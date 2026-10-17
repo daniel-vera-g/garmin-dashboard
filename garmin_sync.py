@@ -52,6 +52,11 @@ RECENT_ACTIVITY_DAYS = _SYNC["recent_activity_days"]
 RECENT_WELLNESS_DAYS = _SYNC["recent_wellness_days"]
 CHUNK = 28                  # Garmin caps several range endpoints
 
+# Exit codes the hosted workflow reports by category (its logs are public, the
+# output itself is withheld).
+EXIT_LOGIN = 3
+EXIT_NO_DATA = 4
+
 _calls = 0
 _failures = 0
 _successes = 0
@@ -441,7 +446,7 @@ def main() -> int:
         c.login(tokenstore=TOKENSTORE)
     except Exception as exc:
         print(f"Not logged in ({type(exc).__name__}). Run:  ./run.sh login")
-        return 1
+        return EXIT_LOGIN
 
     t0 = time.time()
     cov = load_coverage()
@@ -455,7 +460,7 @@ def main() -> int:
     sync_activity_detail(c, acts, today)
     if _successes == 0:
         print("\nSync failed: no Garmin data was retrieved.")
-        return 1
+        return EXIT_NO_DATA
     write_json(CACHE / "meta.json", {"synced_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                      "failed_calls": _failures})
     print(f"\nDone. {_calls} API calls in {time.time() - t0:.0f}s -> {CACHE}")

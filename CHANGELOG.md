@@ -15,7 +15,10 @@ How to release: [docs/releasing.md](docs/releasing.md).
   GitHub. See [docs/hosting.md](docs/hosting.md).
 - `build_dashboard.py --hosted`: pages without Sync, without the Coach popup and its
   data, with `noindex`.
-- `./run.sh hosted-secrets`: uploads config, Garmin tokens and a cache key.
+- `./run.sh hosted-secrets`: uploads config, Garmin tokens (from the configured
+  tokenstore) and a cache key.
+- `garmin_sync.py` exits with 3 for a failed Garmin login and 4 when no data came
+  back, so failures can be told apart without printing the output.
 
 ## [1.2.0] - 2026-10-17
 

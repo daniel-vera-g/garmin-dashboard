@@ -163,6 +163,17 @@ class NeverShown(unittest.TestCase):
         self.assertNotIn("noindex", self.pages["dashboard.html"])           # the local pages are unchanged
         self.assertIn('id="coachdata"', self.pages["dashboard.html"])
 
+    def test_hosted_copy_drops_session_notes_but_keeps_the_verdict(self):
+        conf = Path(self.tmp.name) / "notes.toml"
+        conf.write_text((B.ROOT / "config.example.toml").read_text()
+                        + f'\n[[session]]\ndate = {TODAY}\naccept = true\nnote = "SECRET-NOTE"\n')
+        cache = Path(self.tmp.name) / "cache"
+        local = B.build(cache, Path(self.tmp.name) / "l", config=conf, now=NOW)[0].read_text()
+        hosted = B.build(cache, Path(self.tmp.name) / "h", config=conf, now=NOW, hosted=True)[0].read_text()
+        self.assertIn("SECRET-NOTE", local)
+        self.assertNotIn("SECRET-NOTE", hosted)
+        self.assertIn("Verdict accepted.", hosted)
+
     def test_three_pages_built(self):
         self.assertEqual(set(self.pages), {"dashboard.html", "season.html", "health.html"})
 

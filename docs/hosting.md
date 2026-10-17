@@ -22,11 +22,12 @@ leaves `<user>.github.io` open. The deployment artifact would also be downloadab
 |---|---|
 | Personal config, Garmin tokens | Repository **secrets**, written to the runner with `umask 077` |
 | Garmin cache between runs (health data) | Stored in the Actions cache **encrypted** with `CACHE_KEY` (AES-256, PBKDF2); caches can be read by pull-request workflows |
-| Public workflow logs | Sync output is discarded; only pass/fail is printed |
+| Public workflow logs | Sync and deploy output is discarded (the deploy output names the deployment URL); only a failure category is printed |
+| Third-party code in the job | Actions pinned by commit, wrangler by exact version; the cache key is visible only to the two encryption steps |
 | Deployment | Straight to Cloudflare with wrangler; nothing uploaded to GitHub Pages or as a downloadable artifact |
 | Search engines | `X-Robots-Tag: noindex` + `<meta name="robots">` |
 | Garmin rate limits | The encrypted cache keeps each run at ~9 API calls (a cold run backfills ~250 calls once) |
-| Garmin token expiry | The cache also carries the tokens as last refreshed; if they expire, `./run.sh login` + `./run.sh hosted-secrets` |
+| Garmin token expiry | The cache carries the tokens as last refreshed; tokens uploaded later with `./run.sh hosted-secrets` take precedence (the cache remembers which upload it came from) |
 
 ## Setup (once)
 
@@ -47,21 +48,37 @@ leaves `<user>.github.io` open. The deployment artifact would also be downloadab
    - Pages project → Settings → **Enable access policy**. Then Zero Trust → Access →
      Applications → that application:
      - *Public hostname*: **remove the `*`** from the subdomain, so the production
-       `<project>.pages.dev` is covered, not only previews;
+       `<project>.pages.dev` is covered;
+     - back in the Pages project → Settings: select **Enable access policy again** -
+       this recreates the `*` policy, so every per-deployment address
+       (`<hash>.<project>.pages.dev`) is behind the login as well. Both applications
+       need the GitHub-only login and your email (next two points);
      - *Login methods*: **GitHub only** (switch off One-time PIN), and turn on
        *Instant Auth* to skip the chooser;
      - *Policy*: Allow, Include → **Emails** → the primary email of your GitHub account.
-   - Test in a private window: you must land on GitHub's login, not the dashboard.
+   - Test in a private window, both `https://<project>.pages.dev` and a deployment
+     address from Workers & Pages → the project → Deployments: each must land on
+     GitHub's login, not the dashboard.
    (Cloudflare docs: Pages → Known issues → "Enable Access on your `*.pages.dev`
    domain"; Zero Trust → Identity providers → GitHub.)
 4. **GitHub secrets and variables** (repo → Settings → Secrets and variables → Actions):
    - secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`;
-   - variables `CF_PAGES_PROJECT` (the project name) and `HOSTED_ENABLED` = `true`;
+   - variables `CF_PAGES_PROJECT` (the project name), `TZ` (your timezone, e.g.
+     `Europe/Berlin` - "today", weeks and clock times use it) and `HOSTED_ENABLED` = `true`;
    - then on the Mac: `./run.sh hosted-secrets` (config, Garmin tokens, and a random
      `CACHE_KEY` the first time).
 5. **First run:** `gh workflow run hosted.yml`, then open `https://<project>.pages.dev`.
 
 ## Day to day
+
+The job log says only **sync ok** / **deployed**, or why it failed:
+
+| Log line | Do |
+|---|---|
+| `sync failed: Garmin login` | `./run.sh login`, then `./run.sh hosted-secrets` |
+| `sync failed: Garmin returned no data` | Nothing; Garmin was down or rate-limited, the next run retries |
+| `deploy failed` | Check the Cloudflare token (Pages → Edit) and `CF_PAGES_PROJECT` |
+| `missing secret …` | `./run.sh hosted-secrets` (or the Cloudflare secrets in step 4) |
 
 - After a Coach update or a config edit on the Mac: `./run.sh hosted-secrets`.
 - To stop: set `HOSTED_ENABLED` to `false` (and delete the Pages project if wanted).

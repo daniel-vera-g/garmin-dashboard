@@ -106,7 +106,10 @@ case "${1:-serve}" in
     command -v gh >/dev/null || { echo "needs the GitHub CLI (gh)"; exit 1; }
     [ -f private/config.toml ] || { echo "private/config.toml missing"; exit 1; }
     gh secret set DASHBOARD_CONFIG_TOML < private/config.toml
-    tar -czf - -C "$HOME" .garminconnect | base64 | gh secret set GARMIN_TOKENSTORE_TGZ_B64
+    # the tokenstore the config names ([sync] tokenstore); the workflow restores it there
+    TOKENS="$(.venv/bin/python -c 'import settings, pathlib; print(pathlib.Path(settings.load_athlete()["sync"]["tokenstore"]).expanduser())')"
+    [ -d "$TOKENS" ] || { echo "no Garmin tokens in $TOKENS - run ./run.sh login first"; exit 1; }
+    tar -czf - -C "$TOKENS" . | base64 | gh secret set GARMIN_TOKENSTORE_TGZ_B64
     if ! gh secret list | grep -q '^CACHE_KEY'; then
       openssl rand -base64 32 | gh secret set CACHE_KEY      # set once; it encrypts the cache
     fi

@@ -161,7 +161,7 @@ def _apply_override(sessions: list[Session], o: S.SessionOverride, pace_tol: flo
     if target is None:
         return
     s = target
-    s.coach = o.note or "coach override"
+    s.coach = o.note
     if o.kind and o.kind != s.kind:
         if o.kind == "speed":
             for r in s.reps:

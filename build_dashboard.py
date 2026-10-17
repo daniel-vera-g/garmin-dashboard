@@ -9,6 +9,7 @@ performance condition, body battery, LT heart rate, Garmin FTP.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import statistics
 from datetime import date, datetime, time, timedelta
@@ -387,9 +388,10 @@ def session_detail(s: M.Session, cfg: dict) -> tuple[str, str]:
             bits.append('<span class="dim">No weather data.</span>')
     for note in s.notes:
         bits.append(f'<span class="dim">{escape(note)}.</span>')
-    if s.coach:
-        verdict = " Verdict accepted." if s.accepted else ""
-        bits.insert(0, f'<b>Coach:</b> {escape(s.coach)}.{verdict}')
+    if s.coach or s.accepted:           # the note is empty on the hosted copy
+        text = " ".join(t for t in (f"{escape(s.coach)}." if s.coach else "",
+                                    "Verdict accepted." if s.accepted else "") if t)
+        bits.insert(0, f'<b>Coach:</b> {text}')
     bits.append(f'<a href="https://connect.garmin.com/modern/activity/{escape(a.id)}" '
                 f'target="_blank" rel="noopener">Open in Garmin Connect</a>')
     return fig, "".join(f"<p>{b}</p>" if not b.startswith("<table") else b for b in bits)
@@ -1073,6 +1075,8 @@ def build(cache: Path, out: Path, config: Path | None = None,
     now = now or datetime.now()
     cfg = S.load_athlete(config)
     season = S.load_season(config)
+    if hosted:          # coach notes on sessions stay local; the verdicts still apply
+        season.sessions = [dataclasses.replace(o, note="") for o in season.sessions]
     m = load_model(cache)
     auto = float(cfg["app"]["auto_sync_hours"])
     if m.synced_at:
