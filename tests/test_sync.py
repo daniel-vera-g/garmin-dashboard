@@ -122,5 +122,16 @@ class SyncCoverage(unittest.TestCase):
         self.assertEqual((row["acute"], row["fetched_on"]), (None, TODAY.isoformat()))
 
 
+class ExitCodes(unittest.TestCase):
+    def test_login_failure_and_empty_sync_have_their_own_codes(self):
+        # the hosted workflow reports these categories; its logs are public
+        class NoLogin:
+            def login(self, tokenstore=None):
+                raise RuntimeError("expired")
+        with mock.patch.object(G, "Garmin", NoLogin), mock.patch("builtins.print"):
+            self.assertEqual(G.main(), G.EXIT_LOGIN)
+        self.assertEqual((G.EXIT_LOGIN, G.EXIT_NO_DATA), (3, 4))
+
+
 if __name__ == "__main__":
     unittest.main()

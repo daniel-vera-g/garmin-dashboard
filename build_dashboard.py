@@ -9,6 +9,7 @@ performance condition, body battery, LT heart rate, Garmin FTP.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import statistics
 from datetime import date, datetime, time, timedelta
@@ -387,9 +388,10 @@ def session_detail(s: M.Session, cfg: dict) -> tuple[str, str]:
             bits.append('<span class="dim">No weather data.</span>')
     for note in s.notes:
         bits.append(f'<span class="dim">{escape(note)}.</span>')
-    if s.coach:
-        verdict = " Verdict accepted." if s.accepted else ""
-        bits.insert(0, f'<b>Coach:</b> {escape(s.coach)}.{verdict}')
+    if s.coach or s.accepted:           # the note is empty on the hosted copy
+        text = " ".join(t for t in (f"{escape(s.coach)}." if s.coach else "",
+                                    "Verdict accepted." if s.accepted else "") if t)
+        bits.insert(0, f'<b>Coach:</b> {text}')
     bits.append(f'<a href="https://connect.garmin.com/modern/activity/{escape(a.id)}" '
                 f'target="_blank" rel="noopener">Open in Garmin Connect</a>')
     return fig, "".join(f"<p>{b}</p>" if not b.startswith("<table") else b for b in bits)
@@ -979,6 +981,7 @@ document.querySelectorAll('.scrollx.end').forEach(function(e){e.scrollLeft=e.scr
 })();
 (function(){
   if(location.protocol!=='http:'&&location.protocol!=='https:')return;
+  if(document.body.getAttribute('data-hosted')==='1')return;     // hosted copy: synced by the scheduled job
   var AUTO=parseFloat(document.body.getAttribute('data-auto-sync')||'0');
   var btn=document.getElementById('syncbtn'),at=document.getElementById('syncedat');
   btn.hidden=false;
@@ -1033,18 +1036,18 @@ def coach_dialog(nd: coach.Needs, prompt_text: str) -> tuple[str, str]:
 
 
 def shell(title: str, active: str, header: str, updated: str, body: str, auto_sync: float,
-          coach_ui: tuple[str, str] = ("", "")) -> str:
+          coach_ui: tuple[str, str] = ("", ""), hosted: bool = False) -> str:
     nav = "".join(f'<a href="{href}" class="{"on" if key == active else ""}">{name}</a>'
                   for key, name, href in NAV)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">{'<meta name="robots" content="noindex,nofollow">' if hosted else ""}
 <title>{escape(title)}</title><style>{CSS}</style></head>
-<body data-auto-sync="{auto_sync:g}"><div class="wrap">
+<body data-auto-sync="{auto_sync:g}" data-hosted="{1 if hosted else 0}"><div class="wrap">
 <header class="top"><div class="hl">{header}</div><nav>{nav}</nav>
 <div class="syncbox"><span class="dim ver" title="Dashboard version - see CHANGELOG.md">v{version()}</span>
 <span id="syncedat" class="dim">updated {updated}</span>
-{coach_ui[0]}<button id="syncbtn" class="btn" hidden>Sync</button></div></header>
+{coach_ui[0]}{"" if hosted else '<button id="syncbtn" class="btn" hidden>Sync</button>'}</div></header>
 {body}
 </div>{coach_ui[1]}<div id="tip"></div><script>{JS}</script></body></html>
 """
@@ -1065,10 +1068,15 @@ def header_line(season: S.Season, now: datetime) -> str:
 
 
 def build(cache: Path, out: Path, config: Path | None = None,
-          now: datetime | None = None) -> list[Path]:
+          now: datetime | None = None, hosted: bool = False) -> list[Path]:
+    """hosted=True renders the copy for the hosted site: no Sync button, no Coach
+    popup and none of its data (prompt, caps, coach notes) in the page - those only
+    work against the local server anyway - and a noindex tag."""
     now = now or datetime.now()
     cfg = S.load_athlete(config)
     season = S.load_season(config)
+    if hosted:          # coach notes on sessions stay local; the verdicts still apply
+        season.sessions = [dataclasses.replace(o, note="") for o in season.sessions]
     m = load_model(cache)
     auto = float(cfg["app"]["auto_sync_hours"])
     if m.synced_at:
@@ -1076,12 +1084,15 @@ def build(cache: Path, out: Path, config: Path | None = None,
     else:
         updated = "never"
     head = header_line(season, now)
-    cu = coach_dialog(coach.needs(season, cfg, now.date(), cfg["coach"]["ahead_weeks"]),
-                      coach.prompt(season, cfg, now.date(), m))
+    cu = ("", "") if hosted else coach_dialog(coach.needs(season, cfg, now.date(), cfg["coach"]["ahead_weeks"]),
+                                              coach.prompt(season, cfg, now.date(), m))
+    if hosted:
+        auto = 0.0
+        updated += " · hosted copy"
     pages = {
-        "dashboard.html": shell("Training", "home", head, updated, home(m, cfg, season, now), auto, cu),
-        "season.html": shell("Season", "season", head, updated, season_page(m, cfg, season, now), auto, cu),
-        "health.html": shell("Health", "health", head, updated, health_page(m, cfg, now), auto, cu),
+        "dashboard.html": shell("Training", "home", head, updated, home(m, cfg, season, now), auto, cu, hosted),
+        "season.html": shell("Season", "season", head, updated, season_page(m, cfg, season, now), auto, cu, hosted),
+        "health.html": shell("Health", "health", head, updated, health_page(m, cfg, now), auto, cu, hosted),
     }
     out.mkdir(parents=True, exist_ok=True)
     written = []
@@ -1095,8 +1106,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Render the dashboard pages.")
     ap.add_argument("--cache", type=Path, default=ROOT / "data" / "cache")
     ap.add_argument("--out", type=Path, default=ROOT)
+    ap.add_argument("--hosted", action="store_true",
+                    help="render the hosted copy: no Sync, no Coach popup or its data, noindex")
     args = ap.parse_args()
-    for p in build(args.cache, args.out):
+    for p in build(args.cache, args.out, hosted=args.hosted):
         print(f"Built {p.name:16s} {p.stat().st_size / 1024:5.0f} KB")
     return 0
 

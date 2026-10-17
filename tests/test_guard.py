@@ -149,6 +149,31 @@ class NeverShown(unittest.TestCase):
             res = subprocess.run([node, "--check", str(p)], capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, f"{name}: {res.stderr}")
 
+    def test_hosted_copy_has_no_coach_data_and_no_sync(self):
+        out = Path(self.tmp.name) / "hosted"
+        cache = Path(self.tmp.name) / "cache"
+        pages = {p.name: p.read_text() for p in B.build(cache, out, config=B.ROOT / "config.example.toml",
+                                                        now=NOW, hosted=True)}
+        for name, html in pages.items():
+            for marker in ('id="coachdata"', 'id="coachdlg"', 'id="coachbtn"', 'id="syncbtn"',
+                           "Update for my training dashboard"):
+                self.assertNotIn(marker, html, f"{name}: {marker}")
+            self.assertIn('content="noindex,nofollow"', html)
+            self.assertIn('data-hosted="1"', html)
+        self.assertNotIn("noindex", self.pages["dashboard.html"])           # the local pages are unchanged
+        self.assertIn('id="coachdata"', self.pages["dashboard.html"])
+
+    def test_hosted_copy_drops_session_notes_but_keeps_the_verdict(self):
+        conf = Path(self.tmp.name) / "notes.toml"
+        conf.write_text((B.ROOT / "config.example.toml").read_text()
+                        + f'\n[[session]]\ndate = {TODAY}\naccept = true\nnote = "SECRET-NOTE"\n')
+        cache = Path(self.tmp.name) / "cache"
+        local = B.build(cache, Path(self.tmp.name) / "l", config=conf, now=NOW)[0].read_text()
+        hosted = B.build(cache, Path(self.tmp.name) / "h", config=conf, now=NOW, hosted=True)[0].read_text()
+        self.assertIn("SECRET-NOTE", local)
+        self.assertNotIn("SECRET-NOTE", hosted)
+        self.assertIn("Verdict accepted.", hosted)
+
     def test_three_pages_built(self):
         self.assertEqual(set(self.pages), {"dashboard.html", "season.html", "health.html"})
 

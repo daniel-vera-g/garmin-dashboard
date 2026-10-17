@@ -8,6 +8,7 @@
 #   ./run.sh build      rebuild from cached data only
 #   ./run.sh test       run the test suite
 #   ./run.sh login      re-authenticate with Garmin
+#   ./run.sh hosted-secrets  upload config + Garmin tokens for the hosted copy (docs/hosting.md)
 set -euo pipefail
 cd "$(dirname "$0")"
 DIR="$(pwd)"
@@ -99,5 +100,20 @@ case "${1:-serve}" in
       echo "responding: no"
     fi ;;
 
-  *) echo "usage: ./run.sh [serve|install|uninstall|status|sync|build|test|login]"; exit 1 ;;
+  hosted-secrets)
+    # The hosted copy (docs/hosting.md) reads these from GitHub Actions secrets.
+    # Re-run after a Coach update or ./run.sh login, so the hosted copy matches.
+    command -v gh >/dev/null || { echo "needs the GitHub CLI (gh)"; exit 1; }
+    [ -f private/config.toml ] || { echo "private/config.toml missing"; exit 1; }
+    gh secret set DASHBOARD_CONFIG_TOML < private/config.toml
+    # the tokenstore the config names ([sync] tokenstore); the workflow restores it there
+    TOKENS="$(.venv/bin/python -c 'import settings, pathlib; print(pathlib.Path(settings.load_athlete()["sync"]["tokenstore"]).expanduser())')"
+    [ -d "$TOKENS" ] || { echo "no Garmin tokens in $TOKENS - run ./run.sh login first"; exit 1; }
+    tar -czf - -C "$TOKENS" . | base64 | gh secret set GARMIN_TOKENSTORE_TGZ_B64
+    if ! gh secret list | grep -q '^CACHE_KEY'; then
+      openssl rand -base64 32 | gh secret set CACHE_KEY      # set once; it encrypts the cache
+    fi
+    echo "Secrets updated. Run it now: gh workflow run hosted.yml" ;;
+
+  *) echo "usage: ./run.sh [serve|install|uninstall|status|sync|build|test|login|hosted-secrets]"; exit 1 ;;
 esac
